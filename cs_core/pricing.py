@@ -155,8 +155,10 @@ def shortfall_rate(wl):
 
 def simulate_partner(cfg, tier_name, term, mix, minutes_per_cust=0, start_customers=1, new_per_month=1.0,
                      churn_pct=1.0, resale_discount=0.0, setup_resale_pct=100.0, white_label=False,
-                     setups_per_cust=None):
-    """Month-by-month projection of a partner's revenue, wholesale cost and profit."""
+                     setups_per_cust=None, onboarding_mode="charge", include_setup=True, unit="customers"):
+    """Month-by-month projection of a partner's revenue, wholesale cost and profit.
+    unit: 'customers' (mix = modules per customer) or 'users' (mix = modules per user, no per-customer set-up).
+    onboarding_mode: 'charge' on signing, 'defer' until the first End Customer order, or 'waive'."""
     R = cfg["reseller"]
     tier = tier_by_name(cfg, tier_name)
     wl, disc = wholesale_list(cfg, tier_name, term)
@@ -178,14 +180,17 @@ def simulate_partner(cfg, tier_name, term, mix, minutes_per_cust=0, start_custom
     setup_rrp = sid["platform"]["rrp"] + rec * sid["rec_setup"]["rrp"]
     setup_resale = setup_rrp * float(setup_resale_pct) / 100
     setup_buy = sid["platform"]["buy"] + rec * sid["rec_setup"]["buy"]
+    if not include_setup:
+        setup_w = setup_rrp = setup_resale = setup_buy = 0.0
 
     commit = float(tier["commit"])
     sf_rate = shortfall_rate(wl)
     wl_fee = 0.0 if (not white_label or tier.get("white_label")) else float(R["white_label_fee"])
-    onboarding = float(tier["onboarding"])
+    onboarding = 0.0 if onboarding_mode == "waive" else float(tier["onboarding"])
+    onboard_month = None
 
     rows, cum, c = [], -0.0, 0.0
-    tot = {"revenue": 0.0, "wholesale": 0.0, "shortfall": 0.0, "fees": onboarding, "profit": 0.0, "ours": 0.0}
+    tot = {"revenue": 0.0, "wholesale": 0.0, "shortfall": 0.0, "fees": 0.0, "profit": 0.0, "ours": 0.0}
     payback = None
     for t in range(1, int(term) + 1):
         new = float(start_customers) + float(new_per_month) if t == 1 else float(new_per_month)
@@ -194,7 +199,10 @@ def simulate_partner(cfg, tier_name, term, mix, minutes_per_cust=0, start_custom
         rev = c * cust_resale + new * setup_resale
         cost = c * cust_whsl + new * setup_w
         short = (commit - lic) * sf_rate if (t > R["ramp_months"] and lic < commit) else 0.0
-        fee = wl_fee + (onboarding if t == 1 else 0.0)
+        due_now = onboarding and onboard_month is None and (onboarding_mode != "defer" or new > 0)
+        if due_now:
+            onboard_month = t
+        fee = wl_fee + (onboarding if due_now else 0.0)
         p = rev - cost - short - fee
         cum += p
         if payback is None and cum >= 0:
@@ -204,7 +212,7 @@ def simulate_partner(cfg, tier_name, term, mix, minutes_per_cust=0, start_custom
         tot["revenue"] += rev
         tot["wholesale"] += cost
         tot["shortfall"] += short
-        tot["fees"] += wl_fee
+        tot["fees"] += fee
         tot["profit"] += p
         tot["ours"] += cost - (c * cust_buy + new * setup_buy) + short + fee
     spend = tot["wholesale"] + tot["shortfall"] + tot["fees"]
@@ -219,7 +227,8 @@ def simulate_partner(cfg, tier_name, term, mix, minutes_per_cust=0, start_custom
                          "licences": lic_per_cust, "setup_resale": setup_resale, "setup_wholesale": setup_w},
         "end_mrr_profit": (last.get("revenue", 0) - last.get("wholesale", 0) - last.get("shortfall", 0)) if rows else 0.0,
         "end_customers": last.get("customers", 0), "end_licences": last.get("licences", 0),
-        "shortfall_rate": sf_rate, "white_label_fee": wl_fee, "onboarding": onboarding,
+        "shortfall_rate": sf_rate, "white_label_fee": wl_fee, "onboarding": onboarding, "onboarding_list": float(tier["onboarding"]),
+        "onboarding_mode": onboarding_mode, "onboarding_month": onboard_month, "unit": unit, "include_setup": include_setup,
     }
 
 

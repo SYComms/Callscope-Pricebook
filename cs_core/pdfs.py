@@ -235,7 +235,7 @@ def _blank(v, n=24):
     return v if v else "_" * n
 
 
-def cover_page(pdf, cfg, who, title_line, tiles, docs, services=None, prepared_by="", sign=None):
+def cover_page(pdf, cfg, who, title_line, tiles, docs, services=None, prepared_by="", sign=None, highlight=None):
     """Page 1: 'Agreement to go ahead'. One signature here accepts every page of the pack - the box to drop the
     Zoho Sign signature field onto (or the on-screen signature when signed in person)."""
     B = cfg["brand"]
@@ -247,6 +247,8 @@ def cover_page(pdf, cfg, who, title_line, tiles, docs, services=None, prepared_b
              "confirms you accept every page in this pack - there is nothing else to sign.")
     pdf.ln(3)
     pdf.tiles(tiles)
+    if highlight:
+        pdf.callout(*highlight)
     if services:
         pdf.section("What you are ordering")
         pdf.table([("Item", 150, "L"), ("Qty", 30, "C")], [[n, q] for n, q in services], zebra=False)
@@ -426,15 +428,29 @@ def partner_pack(cfg, sim, partner, prepared_by="", white_label=False, terms_tex
     B, R = cfg["brand"], cfg["reseller"]
     tier = sim["tier"]
     pdf = Doc(B, "PARTNER ORDER")
+    mode, fee = sim.get("onboarding_mode", "charge"), float(tier["onboarding"])
+    onboard_txt = ("None" if not fee else {"charge": money(fee), "defer": "Deferred", "waive": "Waived"}[mode])
+    onboard_long = ("" if not fee else {"charge": f"An onboarding fee of {money(fee)} is invoiced when this agreement is signed.",
+                                        "defer": f"The onboarding fee of {money(fee)} is deferred - it is only invoiced with your first customer order.",
+                                        "waive": f"The onboarding fee of {money(fee)} has been waived."}[mode])
+    highlight = None
+    if not tier["commit"]:
+        free = (not fee) or mode in ("defer", "waive")
+        highlight = (("Pay as you go - nothing to pay until you sell" if free else "Pay as you go - no minimum commitment"),
+                     "There is no minimum number of users or customers and no monthly charge until you have live customers. "
+                     "You pay Call Scope only for the customer subscriptions you sell, at the prices on your price list. " + onboard_long)
+    elif onboard_long:
+        highlight = ("Onboarding", onboard_long)
     cover_page(pdf, cfg, dict(partner, _kind="partner"),
                f"{B['trading']} partner agreement for {partner.get('company') or 'your business'}  |  "
                f"Prepared {date.today().strftime('%d %B %Y')}" + (f" by {prepared_by}" if prepared_by else ""),
                [("Partner tier", tier["name"]), ("Discount off RRP", f"{sim['discount']:g}%"),
-                ("Commitment", f"{int(tier['commit'])} licences" if tier["commit"] else "None"), ("Partner term", f"{sim['term']} months")],
+                ("Commitment", f"{int(tier['commit'])} licences" if tier["commit"] else "None - pay as you go"),
+                ("Onboarding fee", onboard_txt)],
                [["Partner Order", "2", "Your tier and wholesale price list"],
                 ["Commitment & tiers", "3", "How your commitment, ramp and tier moves work"],
                 ["Partner Terms", "4 - {nb}", f"The {B['trading']} reseller terms"]],
-               prepared_by=prepared_by, sign=sign)
+               prepared_by=prepared_by, sign=sign, highlight=highlight)
     pdf.label = "PARTNER ORDER"
     pdf.add_page()
     today = date.today().strftime("%d %B %Y")
@@ -447,10 +463,10 @@ def partner_pack(cfg, sim, partner, prepared_by="", white_label=False, terms_tex
     pdf.section("Your partner tier")
     wl_txt = "Included" if tier.get("white_label") else ("Yes - " + money(R["white_label_fee"]) + "/mo" if white_label else "Co-branded")
     pdf.tiles([("Tier", tier["name"]), ("Discount off RRP", f"{sim['discount']:g}%"),
-               ("Commitment", f"{int(tier['commit'])} licences" if tier["commit"] else "None"),
+               ("Commitment", f"{int(tier['commit'])} licences" if tier["commit"] else "None - pay as you go"),
                ("Partner term", f"{sim['term']} months"),
                ("Ramp period", f"{int(R['ramp_months'])} months" if tier["commit"] else "n/a"),
-               ("Onboarding fee", money(tier["onboarding"]) if tier["onboarding"] else "Waived"),
+               ("Onboarding fee", onboard_txt if onboard_txt != "Deferred" else "Due w/ 1st order"),
                ("White label", wl_txt), ("Billing", "Monthly in advance")])
 
     pdf.section("Wholesale price list (monthly, per unit)")
@@ -480,7 +496,7 @@ def partner_pack(cfg, sim, partner, prepared_by="", white_label=False, terms_tex
                  f"the gap is charged at {money(sim['shortfall_rate'])} per licence (the lowest licence price on your price list). "
                  "Grow past the next tier for three months in a row and you move up automatically - with a bigger discount.")
     else:
-        pdf.para("The Registered tier has no commitment: you pay only for what your customers use. Grow past a tier's commitment "
+        pdf.para(f"The {tier['name']} tier has no commitment - it is pay as you go: you pay only for the customer subscriptions you sell. Grow past a tier's commitment "
                  "for three months in a row and you move up automatically - with a bigger discount.")
     pdf.ln(2)
     cols = [("Tier", 30, "L"), ("Commitment", 30, "C"), ("Discount off RRP", 32, "C"), ("Onboarding", 28, "R"), ("White label", 28, "C"), ("", 32, "L")]
@@ -526,7 +542,7 @@ def partner_roi_pdf(cfg, sim, partner, plan):
                ("You keep", money(T["profit"], 0)),
                ("Pays back", f"Month {sim['payback_month']}" if sim["payback_month"] else "Not within term")])
     pdf.tiles([("Kept per £1 paid to us", f"£{sim['roi_pct'] / 100:.2f}"), ("Kept each month by the end", money(sim["end_mrr_profit"], 0)),
-               ("Customers by the end", f"{sim['end_customers']:.0f}"), ("Partner term", f"{sim['term']} months")])
+               (f"{sim.get('unit', 'customers').capitalize()} by the end", f"{sim['end_customers']:.0f}"), ("Partner term", f"{sim['term']} months")])
     pdf.section("The plan behind these numbers")
     pdf.bullets(plan)
     pdf.section("Year by year")
@@ -536,7 +552,7 @@ def partner_roi_pdf(cfg, sim, partner, plan):
         rev = sum(r["revenue"] for r in seg); cost = sum(r["wholesale"] + r["shortfall"] + r["fees"] for r in seg)
         rows.append([f"Year {y // 12 + 1}", f"{seg[-1]['customers']:.0f}", money(rev, 0), money(cost, 0),
                      money(rev - cost, 0), money(seg[-1]["cumulative"], 0)])
-    pdf.table([("Year", 20, "L"), ("Customers", 22, "R"), ("Customers pay you", 36, "R"), ("You pay Call Scope", 36, "R"),
+    pdf.table([("Year", 20, "L"), (sim.get("unit", "customers").capitalize(), 22, "R"), ("Customers pay you", 36, "R"), ("You pay Call Scope", 36, "R"),
                ("You keep", 32, "R"), ("Kept so far", 34, "R")], rows, bold_cols=(4,))
     vals = [sim["rows"][min(len(sim["rows"]) - 1, y + 11)]["cumulative"] for y in range(0, sim["term"], 12)]
     pdf.ln(2)
@@ -544,11 +560,16 @@ def partner_roi_pdf(cfg, sim, partner, plan):
     pdf.cell(0, 5, "What you have kept by the end of each year", new_x="LMARGIN", new_y="NEXT")
     pdf.bars([max(0, v) for v in vals], [money(v, 0) for v in vals], [f"Year {i + 1}" for i in range(len(vals))])
     pc = sim["per_customer"]
-    pdf.section("Per typical customer")
-    pdf.bullets([f"Each month you charge each customer {money(pc['resale'])}, pay Call Scope {money(pc['wholesale'])} "
-                 f"and keep {money(pc['profit'])}.",
-                 f"Set-up, once per new customer: you charge {money(pc['setup_resale'])}, pay Call Scope {money(pc['setup_wholesale'])} "
-                 f"and keep {money(pc['setup_resale'] - pc['setup_wholesale'])}."])
+    one = "user" if sim.get("unit") == "users" else "customer"
+    pdf.section(f"Per typical {one}")
+    pts = [f"Each month you charge each {one} {money(pc['resale'])}, pay Call Scope {money(pc['wholesale'])} "
+           f"and keep {money(pc['profit'])}."]
+    if sim.get("include_setup", True):
+        pts.append(f"Set-up, once per new customer: you charge {money(pc['setup_resale'])}, pay Call Scope {money(pc['setup_wholesale'])} "
+                   f"and keep {money(pc['setup_resale'] - pc['setup_wholesale'])}.")
+    if not sim["tier"]["commit"]:
+        pts.append("No minimum commitment - you only pay Call Scope for what you sell.")
+    pdf.bullets(pts)
     pdf.ln(2)
     pdf.set_font("Helvetica", "I", 7); pdf.set_text_color(*MUTE)
     pdf.multi_cell(180, 3.6, s("Illustrative projection based on the assumptions above. It is not a forecast or a guarantee of results. "

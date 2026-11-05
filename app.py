@@ -693,7 +693,8 @@ def reseller_mode():
             c1, c2 = st.columns(2)
             pterms = [int(t["months"]) for t in R["terms"]]
             if st.session_state.get("p_term") not in pterms:
-                st.session_state.p_term = pterms[-1]
+                dt = int(R.get("default_term", 36))
+                st.session_state.p_term = dt if dt in pterms else pterms[0]
             term = c1.selectbox("Partner term", pterms, key="p_term",
                                 format_func=lambda m: f"{m} months" + (f"  (+{next(t['bonus'] for t in R['terms'] if int(t['months']) == m):g}% discount)"
                                                                         if next(t['bonus'] for t in R['terms'] if int(t['months']) == m) else ""))
@@ -702,22 +703,40 @@ def reseller_mode():
                 white = True
             else:
                 white = c2.toggle(f"White label (+{money(R['white_label_fee'], 0)}/mo)", key="p_white")
+            onboarding_mode = "charge"
+            if tier["onboarding"]:
+                onboarding_mode = c1.selectbox(f"Onboarding fee ({money(tier['onboarding'], 0)})", ["charge", "defer", "waive"], key="p_onboard",
+                                               format_func=lambda m: {"charge": "Charge on signing", "defer": "Defer until their first customer order",
+                                                                      "waive": "Waive it"}[m])
+            if not tier["commit"]:
+                render_html('<div class="pe-note" style="margin:6px 0 0"><b>Pay as you go</b> - no minimum users or customers. '
+                            'Set the growth plan to 0 for a no-cost sign-up pack, or put in "X a month" for an example quote.</div>')
 
         with st.container(key="card-plan"):
-            section_header("03", "Growth plan", "Drives the partner's return-on-investment view - use their own numbers")
+            section_header("03", "Growth plan", "Their example quote - 'if you sold X a month over the term, this is what you'd keep'")
+            unit = st.radio("Plan by", ["customers", "users"], horizontal=True, key="p_unit",
+                            format_func=lambda u: "Customers (businesses) a month" if u == "customers" else "Users a month")
+            one = "customer" if unit == "customers" else "user"
             c1, c2, c3 = st.columns(3)
-            start = c1.number_input("Customers at launch", 0, 500, value=2, step=1, key="p_start")
-            per_month = c2.number_input("New customers per month", 0.0, 100.0, value=1.0, step=0.5, key="p_new")
-            churn = c3.number_input("Monthly churn %", 0.0, 10.0, value=1.0, step=0.5, key="p_churn")
+            start = c1.number_input(f"{unit.capitalize()} at launch", 0, 5000, value=2 if unit == "customers" else 0, step=1, key=f"p_start_{unit}")
+            per_month = c2.number_input(f"New {unit} per month", 0, 1000, value=1 if unit == "customers" else 10, step=1, key=f"p_new_{unit}")
+            churn = c3.number_input("Monthly churn %", 0.0, 10.0, value=1.0, step=0.5, key="p_churn",
+                                    help=f"The share of {unit} who leave each month.")
             c1, c2, c3 = st.columns(3)
             resale_disc = c1.slider("Partner's discount to their customers", 0, 40, value=0, step=5, key="p_resale",
                                     help="0% = the partner sells at our RRP.")
-            setup_pct = c2.slider("Set-up charged at % of RRP", 0, 100, value=100, step=10, key="p_setup_pct")
             mc = CFG["minutes"]
-            mins = c3.selectbox("Minutes per customer", [0] + list(mc["bundles"]), index=1, key="p_mins",
-                                format_func=lambda m: "None" if not m else f"{m:,} mins")
-            st.markdown("**Typical customer** - modules per customer, on average")
-            defaults = {"portal": 5, "crm": 0, "dashboard": 1, "callscore": 3, "receptionist": 0, "widget": 0}
+            if unit == "customers":
+                setup_pct = c2.slider("Set-up charged at % of RRP", 0, 100, value=100, step=10, key="p_setup_pct")
+                mins = c3.selectbox("Minutes per customer", [0] + list(mc["bundles"]), index=1, key="p_mins",
+                                    format_func=lambda m: "None" if not m else f"{m:,} mins")
+                st.markdown("**Typical customer** - modules per customer, on average")
+                defaults = {"portal": 5, "crm": 0, "dashboard": 1, "callscore": 3, "receptionist": 0, "widget": 0}
+            else:
+                setup_pct, mins = 100, 0
+                c2.caption("Per-user plan: set-up fees and minute bundles are left out - they're per business, not per user.")
+                st.markdown("**Each user takes** - modules per user")
+                defaults = {"portal": 1, "crm": 0, "dashboard": 0, "callscore": 1, "receptionist": 0, "widget": 0}
             mix = {}
             mods = CFG["modules"]
             try:
@@ -726,10 +745,12 @@ def reseller_mode():
                 cols = st.columns(len(mods))
             for c, m in zip(cols, mods):
                 mix[m["id"]] = c.number_input(m["name"].replace("AI Integration - ", ""), 0.0, 100.0,
-                                              value=float(defaults.get(m["id"], 0)), step=0.5, key=f"p_mix_{m['id']}")
+                                              value=float(defaults.get(m["id"], 0)), step=1.0 if unit == "users" else 0.5,
+                                              format="%.0f" if unit == "users" else "%.1f", key=f"p_mix_{unit}_{m['id']}")
 
     kw = dict(mix=mix, minutes_per_cust=mins, start_customers=start, new_per_month=per_month, churn_pct=churn,
-              resale_discount=resale_disc, setup_resale_pct=setup_pct, white_label=white)
+              resale_discount=resale_disc, setup_resale_pct=setup_pct, white_label=white,
+              onboarding_mode=onboarding_mode, include_setup=(unit == "customers"), unit=unit)
     sim = simulate_partner(CFG, tier_name, term, **kw)
     has = sim["per_customer"]["resale"] > 0 and (start or per_month)
     T = sim["totals"]
@@ -741,26 +762,40 @@ def reseller_mode():
 
     plan = [f"Partner tier: {tier_name} ({sim['discount']:g}% off RRP) on a {term}-month partner term"
             + (f", committing to {int(tier['commit'])} licences" if tier["commit"] else ", no commitment") + ".",
-            f"Starts with {start:g} customer{'s' if start != 1 else ''} and adds {per_month:g} a month, with {churn:g}% of customers leaving each month.",
-            "Typical customer: " + ", ".join(f"{v:g} x {next(m['name'] for m in CFG['modules'] if m['id'] == k)}" for k, v in mix.items() if v)
+            f"Starts with {start:g} {one if start == 1 else unit} and adds {per_month:g} new {one if per_month == 1 else unit} a month for {term // 12 if term % 12 == 0 else term} "
+            f"{'years' if term % 12 == 0 else 'months'}, with {churn:g}% leaving each month.",
+            ("Typical customer: " if unit == "customers" else "Each user takes: ") + ", ".join(f"{v:g} x {next(m['name'] for m in CFG['modules'] if m['id'] == k)}" for k, v in mix.items() if v)
             + (f", {mins:,} AI minutes" if mins else "") + ".",
-            f"Sells at {'our RRP' if not resale_disc else f'{resale_disc}% below RRP'}; set-up charged at {setup_pct}% of RRP."]
+            f"Sells at {'our RRP' if not resale_disc else f'{resale_disc}% below RRP'}"
+            + (f"; set-up charged at {setup_pct}% of RRP." if unit == "customers" else ".")]
 
     with right:
         with st.container(key="card-rsummary"):
-            render_html('<div class="pe-sum-label">Reseller keeps over the term</div>')
-            render_html(f'<div class="pe-sum-big">{money(T["profit"], 0)}</div>')
+            if has:
+                render_html('<div class="pe-sum-label">Reseller keeps over the term</div>')
+                render_html(f'<div class="pe-sum-big">{money(T["profit"], 0)}</div>')
+            else:
+                render_html('<div class="pe-sum-label">Sign-up pack</div>')
+                render_html('<div class="pe-sum-big" style="font-size:1.5rem">'
+                            + ("Nothing to pay until they sell" if (not tier["commit"] and (not tier["onboarding"] or onboarding_mode != "charge"))
+                               else f"{money(tier['onboarding'] if onboarding_mode == 'charge' else 0, 0)} on signing") + '</div>')
             bonus = sim["discount"] - float(tier["discount"])
             disc_chip = chip(f"{sim['discount']:g}% off RRP", "good") + (chip(f"incl. +{bonus:g}% for {term} months") if bonus else "")
             render_html(f'<div style="margin:8px 0 10px">{chip(tier_name, "accent")}{disc_chip}{chip(f"{term} months")}</div>')
             hit = sim["commit_hit_month"]
-            commit_txt = ("None" if not tier["commit"] else (f"Reached month {hit}" if hit else "Not reached"))
-            render_html(f'<div class="pe-row">Keeps per £1 paid to Call Scope<b>£{sim["roi_pct"] / 100:.2f}</b></div>'
-                        f'<div class="pe-row">Keeps each month by the end<b>{money(sim["end_mrr_profit"], 0)}</b></div>'
-                        f'<div class="pe-row">Pays back<b>{"Month " + str(sim["payback_month"]) if sim["payback_month"] else "Not in term"}</b></div>'
-                        f'<div class="pe-row">Commitment<b>{commit_txt}</b></div>'
-                        f'<div class="pe-row">Shortfall charges<b>{money(T["shortfall"], 0)}</b></div>')
-            if tier["commit"] and (not hit or hit > sim["ramp"]):
+            commit_txt = ("None - pay as you go" if not tier["commit"] else (f"Reached month {hit}" if hit else "Not reached"))
+            ob = ("None" if not tier["onboarding"] else {"charge": money(tier["onboarding"], 0), "defer": "With first order",
+                                                         "waive": "Waived"}[onboarding_mode])
+            rows_html = ""
+            if has:
+                rows_html += (f'<div class="pe-row">Keeps per £1 paid to Call Scope<b>£{sim["roi_pct"] / 100:.2f}</b></div>'
+                              f'<div class="pe-row">Keeps each month by the end<b>{money(sim["end_mrr_profit"], 0)}</b></div>'
+                              f'<div class="pe-row">Pays back<b>{"Month " + str(sim["payback_month"]) if sim["payback_month"] else "Not in term"}</b></div>')
+            rows_html += f'<div class="pe-row">Commitment<b>{commit_txt}</b></div><div class="pe-row">Onboarding fee<b>{ob}</b></div>'
+            if tier["commit"]:
+                rows_html += f'<div class="pe-row">Shortfall charges<b>{money(T["shortfall"], 0)}</b></div>'
+            render_html(rows_html)
+            if has and tier["commit"] and (not hit or hit > sim["ramp"]):
                 st.warning(f"On this plan the partner doesn't reach {int(tier['commit'])} licences within the {sim['ramp']}-month ramp, "
                            "so shortfall charges apply. Compare tiers below.")
             st.download_button("Download partner pack", data=blank_pdf, file_name=f"{fname}.pdf",
@@ -768,11 +803,14 @@ def reseller_mode():
 
     st.write("")
     if not has:
-        empty_state("Add a growth plan", ["Set how many customers the partner starts with", "Add new customers per month",
-                                          "Describe a typical customer's modules"], icon="users")
-        return
-
-    view = view_switch(["Partner ROI view", "Compare tiers and terms", "Wholesale price list", "Sign and send"], "p_view")
+        empty_state("No growth plan - this is a sign-up pack", [f"Add {unit} at launch or new {unit} a month to show an example quote",
+                                                                "Or send the pack as it is to sign the reseller up",
+                                                                "The price list and signing are below"], icon="users")
+        st.write("")
+        views = ["Wholesale price list", "Sign and send"]
+    else:
+        views = ["Partner ROI view", "Compare tiers and terms", "Wholesale price list", "Sign and send"]
+    view = view_switch(views, "p_view")
     if view == "Partner ROI view":
         roi_view(sim, partner, kw)
     elif view == "Compare tiers and terms":
@@ -785,7 +823,7 @@ def reseller_mode():
                                "Note": "Held at our floor price" if w["floored"] else ""} for w in wl]))
         mc = CFG["minutes"]
         st.caption(f"AI minutes: {money(mc['wholesale_per_min'] * 100)} per 100 wholesale (RRP {money(mc['rrp_per_min'] * 100)}). "
-                   f"Shortfall rate: {money(sim['shortfall_rate'])} per licence. Set-up: "
+                   + (f"Shortfall rate: {money(sim['shortfall_rate'])} per licence. " if sim["tier"]["commit"] else "") + "Set-up: "
                    + ", ".join(f"{s['name']} {money(s['wholesale'], 0)} (RRP {money(s['rrp'], 0)})" for s in CFG["setup"]) + ".")
         fl = [w["name"] for w in wl if w["floored"]]
         if fl:
@@ -812,6 +850,8 @@ def money_flow(items):
 def roi_view(sim, partner, kw):
     """The reseller's quote: their customers pay them, they pay Call Scope, they keep the difference."""
     T, pc = sim["totals"], sim["per_customer"]
+    unit = sim.get("unit", "customers")
+    one = "customer" if unit == "customers" else "user"
     who = partner.get("company") or "the reseller"
     paid = T["wholesale"] + T["shortfall"] + T["fees"]
     term = sim["term"]
@@ -819,14 +859,13 @@ def roi_view(sim, partner, kw):
                 'What Call Scope makes from the partnership is in Admin &gt; Deal margins.</div>')
 
     st.markdown(f"##### Over the {term}-month partner term")
-    money_flow([("Their customers pay them", money(T["revenue"], 0), "monthly subscriptions + set-up fees", ""),
+    money_flow([("Their customers pay them", money(T["revenue"], 0), "monthly subscriptions" + (" + set-up fees" if sim.get("include_setup", True) else ""), ""),
                 ("They pay Call Scope", money(paid, 0), "wholesale prices" + (", onboarding" if sim["onboarding"] else "")
                  + (", white label" if sim["white_label_fee"] else "") + (", shortfall" if T["shortfall"] else ""), ""),
                 ("They keep", money(T["profit"], 0), f"{sim['margin_pct']:.0f}% of everything they bill", "good")])
     st.write("")
 
-    # per typical customer, line by line
-    st.markdown("##### For each typical customer, every month")
+    st.markdown(f"##### For each typical {one}, every month")
     wmap = {w["id"]: w for w in sim["wholesale"]}
     rd = float(kw.get("resale_discount", 0)) / 100
     rows = []
@@ -843,32 +882,33 @@ def roi_view(sim, partner, kw):
         rows.append({"Item": f"AI minutes ({mins:,})", "Qty": "1", "They charge (each)": money(mins * mc["rrp_per_min"]),
                      "They pay Call Scope (each)": money(mins * mc["wholesale_per_min"]),
                      "They keep a month": money(mins * (mc["rrp_per_min"] - mc["wholesale_per_min"]))})
-    rows.append({"Item": "Total per customer, per month", "Qty": "", "They charge (each)": money(pc["resale"]),
+    rows.append({"Item": f"Total per {one}, per month", "Qty": "", "They charge (each)": money(pc["resale"]),
                  "They pay Call Scope (each)": money(pc["wholesale"]), "They keep a month": money(pc["profit"])})
-    rows.append({"Item": "One-off set-up per new customer", "Qty": "", "They charge (each)": money(pc["setup_resale"]),
-                 "They pay Call Scope (each)": money(pc["setup_wholesale"]), "They keep a month": money(pc["setup_resale"] - pc["setup_wholesale"]) + " once"})
+    if sim.get("include_setup", True):
+        rows.append({"Item": "One-off set-up per new customer", "Qty": "", "They charge (each)": money(pc["setup_resale"]),
+                     "They pay Call Scope (each)": money(pc["setup_wholesale"]), "They keep a month": money(pc["setup_resale"] - pc["setup_wholesale"]) + " once"})
     show_df(pd.DataFrame(rows))
     st.write("")
 
     kpi_row([("Pays for itself", f"Month {sim['payback_month']}" if sim["payback_month"] else "Not in term",
               "when what they've kept goes above zero"),
              ("For every £1 paid to Call Scope", f"£{(T['profit'] / paid) if paid else 0:.2f}", "the reseller keeps this much"),
-             ("Kept each month by the end", money(sim["end_mrr_profit"], 0), f"{sim['end_customers']:.0f} customers, {sim['end_licences']:.0f} licences"),
-             ("Customers by the end", f"{sim['end_customers']:.0f}", f"starting {kw['start_customers']:g}, +{kw['new_per_month']:g} a month")])
+             ("Kept each month by the end", money(sim["end_mrr_profit"], 0), f"{sim['end_customers']:.0f} {unit}, {sim['end_licences']:.0f} licences"),
+             (f"{unit.capitalize()} by the end", f"{sim['end_customers']:.0f}", f"starting {kw['start_customers']:g}, +{kw['new_per_month']:g} a month")])
     st.write("")
 
     df = pd.DataFrame(sim["rows"])
     df["Month"] = df["month"]
     df["Kept so far"] = df["cumulative"]
     base = alt.Chart(df).encode(x=alt.X("Month:Q", title="Month", scale=alt.Scale(domain=[1, term], nice=False),
-                                        axis=alt.Axis(tickMinStep=1, values=list(range(0, term + 1, 6))[1:] or [1])))
+                                        axis=alt.Axis(tickMinStep=1, values=list(range(0, term + 1, 6 if term <= 48 else 12))[1:] or [1])))
     area = base.mark_area(color="#34D399", opacity=0.14).encode(y=alt.Y("Kept so far:Q", title="Kept so far (£)", axis=alt.Axis(format=",.0f")))
     line = base.mark_line(color="#34D399", strokeWidth=2).encode(y="Kept so far:Q")
     hover = alt.selection_point(fields=["Month"], nearest=True, on="pointerover", empty=False)
     pts = base.mark_point(size=70, filled=True, color="#34D399").encode(
         y="Kept so far:Q", opacity=alt.condition(hover, alt.value(1), alt.value(0)),
         tooltip=[alt.Tooltip("Month:Q"), alt.Tooltip("Kept so far:Q", format=",.0f", title="Kept so far £"),
-                 alt.Tooltip("customers:Q", format=".0f", title="Customers"), alt.Tooltip("profit:Q", format=",.0f", title="Kept that month £")]
+                 alt.Tooltip("customers:Q", format=".0f", title=unit.capitalize()), alt.Tooltip("profit:Q", format=",.0f", title="Kept that month £")]
     ).add_params(hover)
     zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color="rgba(148,163,184,.4)").encode(y="y:Q")
     st.markdown("##### What the reseller keeps, building up month by month")
@@ -879,14 +919,14 @@ def roi_view(sim, partner, kw):
         seg = sim["rows"][y:y + 12]
         rev = sum(r["revenue"] for r in seg)
         cost = sum(r["wholesale"] + r["shortfall"] + r["fees"] for r in seg)
-        row = {"Year": f"Year {y // 12 + 1}", "Customers": f"{seg[-1]['customers']:.0f}",
+        row = {"Year": f"Year {y // 12 + 1}", unit.capitalize(): f"{seg[-1]['customers']:.0f}",
                "Their customers pay them": money(rev, 0), "They pay Call Scope": money(cost, 0),
                "They keep": money(rev - cost, 0), "Kept so far": money(seg[-1]["cumulative"], 0)}
         if T["shortfall"]:
             row["of which shortfall"] = money(sum(r["shortfall"] for r in seg), 0)
         rows.append(row)
     show_df(pd.DataFrame(rows))
-    st.caption("Illustrative only - excludes VAT and the annual price review. Every customer is assumed to take the typical mix above.")
+    st.caption("Illustrative only - excludes VAT and the annual price review. " + f"Every {one} is assumed to take the mix above.")
 
 
 def compare_view(sim, kw, term):

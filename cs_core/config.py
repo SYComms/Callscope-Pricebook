@@ -70,6 +70,8 @@ DEFAULTS = {
         {"months": 36, "max_discount": 30},
         {"months": 48, "max_discount": 35},
         {"months": 60, "max_discount": 40},
+        {"months": 72, "max_discount": 40},
+        {"months": 84, "max_discount": 40},
     ],
     "annual_review_pct": 5.0,          # annual price review on monthly charges
     "late_payment_fee": 25.0,
@@ -79,8 +81,8 @@ DEFAULTS = {
     "reseller": {
         # Each tier: committed licences (counted monthly modules) and discount off RRP.
         "tiers": [
-            {"name": "Registered", "commit": 0, "discount": 30, "onboarding": 495.0, "white_label": False,
-             "note": "No commitment - pay as you grow"},
+            {"name": "Bronze", "commit": 0, "discount": 30, "onboarding": 495.0, "white_label": False,
+             "note": "No commitment - pay as you go"},
             {"name": "Silver", "commit": 25, "discount": 40, "onboarding": 295.0, "white_label": False,
              "note": "Commit to 25 licences"},
             {"name": "Gold", "commit": 50, "discount": 45, "onboarding": 0.0, "white_label": False,
@@ -93,7 +95,12 @@ DEFAULTS = {
             {"months": 12, "bonus": 0.0},
             {"months": 24, "bonus": 2.5},
             {"months": 36, "bonus": 5.0},
+            {"months": 48, "bonus": 6.0},
+            {"months": 60, "bonus": 7.5},
+            {"months": 72, "bonus": 8.5},
+            {"months": 84, "bonus": 10.0},
         ],
+        "default_term": 36,
         "floor_margin_pct": 25.0,      # wholesale never goes below our cost + this %
         "ramp_months": 6,              # months to reach the commitment before shortfall applies
         "white_label_fee": 149.0,      # monthly, unless the tier includes it
