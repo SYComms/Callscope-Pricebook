@@ -4,9 +4,11 @@ Stand-alone quoting app for **Call Scope**, with two sides:
 
 | Workspace | What it does | Paperwork |
 |---|---|---|
-| **Customer quote** | Direct sale to a business. Pick modules, minutes, term (12–60 months) and an introductory discount (capped by term). The discount steps down evenly each year to the standard price in the final year, or can be fixed for the term. Includes a Customer View, Price Schedule chart and an internal Margin tab. | Service Order + Price Schedule + Call Scope Terms & Conditions (PDF) |
-| **Reseller partner** | Wholesale pricing by tier (Registered / Silver / Gold / Platinum), commitment, ramp and partner term. Models the partner's growth and shows their return: profit over the term, return on spend, payback, running-profit chart, tier and term comparison. | Partner Order + Wholesale Price List + Partner Terms (PDF), and a 1-page ROI projection |
-| **Admin** (admin password only) | Edit services, prices, term discount caps, tiers, set-up fees, minutes rates, branding and both sets of T&Cs. | `config.json` backup / restore |
+| **Customer quote** | Direct sale to a business. Pull the customer from Zoho, pick modules, minutes, term (12–60 months) and an introductory discount (capped by term). The discount steps down evenly each year to the standard price in the final year, or can be fixed for the term. Customer View, Price Schedule, Sign and send. | Agreement to go ahead (cover - the only signature) + Service Order + Price Schedule + Terms & Conditions |
+| **Reseller partner** | Wholesale pricing by tier (Registered / Silver / Gold / Platinum), commitment, ramp and partner term. Models the partner's growth and return: profit, return on spend, payback, running-profit chart, tier and term comparison. Sign and send. | Agreement to go ahead + Partner Order + Commitment & tiers + Partner Terms, and a 1-page ROI projection |
+| **Admin** (locked - admin password) | Deal margins and contract values for the quote/plan in progress, services and prices, term discount caps, tiers, set-up fees, minutes rates, branding, both sets of T&Cs, Zoho connection (with refresh-token helper). | `config.json` backup / restore |
+
+**Signing:** every pack starts with an *Agreement to go ahead* page. One signature there accepts the whole pack. Either download the pack and send it in Zoho Sign (drag a Signature field onto the box on page 1), or sign on screen with the customer and download the signed pack.
 
 ## Deploy (GitHub + Streamlit Cloud)
 
@@ -21,6 +23,11 @@ ADMIN_PASSWORD = "admin-password"
 GITHUB_TOKEN  = "github_pat_..."
 GITHUB_REPO   = "sammyatt2010-hub/callscope-pricebook"
 GITHUB_BRANCH = "main"
+# Zoho CRM look-up - the same values as the SYGroup Pricebook (read-only scope)
+ZOHO_CLIENT_ID     = "1000...."
+ZOHO_CLIENT_SECRET = "..."
+ZOHO_REFRESH_TOKEN = "1000...."
+# ZOHO_REG_FIELD = "API name of the Companies House number field"   (optional)
 ```
 
 The app stays locked until at least one password is set.
@@ -43,6 +50,7 @@ cs_core/config.py    default prices/tiers/branding + save to GitHub
 cs_core/pricing.py   all the maths (customer schedule, wholesale, partner ROI)
 cs_core/pdfs.py      the PDF paperwork
 cs_core/terms.py     default customer and partner T&Cs (editable in Admin)
+cs_core/zoho.py      Zoho CRM customer look-up (read-only)
 assets/              logo and product images
 ```
 

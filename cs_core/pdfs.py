@@ -235,11 +235,89 @@ def _blank(v, n=24):
     return v if v else "_" * n
 
 
+def cover_page(pdf, cfg, who, title_line, tiles, docs, services=None, prepared_by="", sign=None):
+    """Page 1: 'Agreement to go ahead'. One signature here accepts every page of the pack - the box to drop the
+    Zoho Sign signature field onto (or the on-screen signature when signed in person)."""
+    B = cfg["brand"]
+    sign = sign or {}
+    pdf.label = "AGREEMENT TO GO AHEAD"
+    pdf.add_page()
+    pdf.doc_title("Agreement to go ahead", title_line)
+    pdf.para(f"Thank you for choosing {B['trading']}. This page summarises your agreement. Signing once, at the bottom of this page, "
+             "confirms you accept every page in this pack - there is nothing else to sign.")
+    pdf.ln(3)
+    pdf.tiles(tiles)
+    if services:
+        pdf.section("What you are ordering")
+        pdf.table([("Item", 150, "L"), ("Qty", 30, "C")], [[n, q] for n, q in services], zebra=False)
+    pdf.section("What is in this pack")
+    pdf.table([("Document", 55, "L"), ("Pages", 25, "C"), ("What it covers", 100, "L")], docs, bold_cols=(0,), zebra=False)
+
+    # declaration + signature panel - kept together at the foot of the page
+    need = 70
+    if pdf.get_y() + need > 277:
+        pdf.add_page()
+    else:
+        pdf.set_y(max(pdf.get_y() + 4, 277 - need))
+    company = who.get("company") or "the business named above"
+    pdf.set_fill_color(*pdf.NAVY); pdf.set_text_color(255, 255, 255); pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(180, 7.5, s("  Agreement to go ahead"), fill=True, new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1.5)
+    pdf.set_font("Helvetica", "", 8.2); pdf.set_text_color(*INK)
+    pdf.multi_cell(180, 4.2, s(f"I am authorised to sign for {company}. I have read and agree to everything in this pack (pages 2 to {{nb}}) "
+                               f"and I ask {B['legal']} to go ahead."), new_x="LMARGIN", new_y="NEXT")
+    y0 = pdf.get_y() + 3
+    # signature box
+    pdf.set_fill_color(255, 255, 255); pdf.set_draw_color(*pdf.VIO); pdf.set_line_width(0.5)
+    pdf.rect(15, y0, 92, 30, "DF")
+    pdf.set_line_width(0.2)
+    pdf.set_xy(18, y0 + 2); pdf.set_font("Helvetica", "B", 6.8); pdf.set_text_color(*pdf.VIO)
+    pdf.cell(60, 4, "CUSTOMER SIGNATURE" if who.get("_kind") != "partner" else "PARTNER SIGNATURE")
+    sb = sign.get("sig")
+    if sb and len(sb) > 100:
+        try:
+            pdf.image(io.BytesIO(sb), x=20, y=y0 + 7, w=60, h=20, keep_aspect_ratio=True)
+        except Exception:
+            pass
+    # name / position / company / date
+    rows = [("Name", sign.get("name") or who.get("contact", "")), ("Position", sign.get("position") or who.get("position", "")),
+            ("Company", who.get("company", "")), ("Date", sign.get("date", ""))]
+    for i, (k, v) in enumerate(rows):
+        yy = y0 + 1 + i * 7.3
+        pdf.set_xy(112, yy); pdf.set_font("Helvetica", "B", 7); pdf.set_text_color(*MUTE)
+        pdf.cell(18, 6, s(k.upper()))
+        pdf.set_font("Helvetica", "", 8.6); pdf.set_text_color(*INK)
+        pdf.cell(65, 6, s(v)[:40])
+        pdf.set_draw_color(*LINE); pdf.line(130, yy + 6, 195, yy + 6)
+    pdf.set_y(y0 + 33)
+    pdf.set_font("Helvetica", "", 7.4); pdf.set_text_color(*MUTE)
+    pdf.cell(0, 4.5, s(f"For {B['legal']}:  {_blank(prepared_by, 26)}    Date:  {date.today().strftime('%d/%m/%Y')}"),
+             new_x="LMARGIN", new_y="NEXT")
+
+
+def signed_note(pdf, text):
+    pdf.ln(4)
+    pdf.set_fill_color(*pdf.TINT); pdf.set_text_color(*pdf.VIO); pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(180, 7, s("  " + text), fill=True, new_x="LMARGIN", new_y="NEXT")
+
+
 # ─────────────────────────── CUSTOMER PACK ───────────────────────────
-def customer_pack(cfg, q, cust, prepared_by="", show_review=False, terms_text=None):
+def customer_pack(cfg, q, cust, prepared_by="", show_review=False, terms_text=None, sign=None):
     B = cfg["brand"]
     q = dict(q, show_review=show_review)
     pdf = Doc(B, "SERVICE ORDER")
+    stepped = q["discount"] > 0 and q["style"] == "stepped" and q["years"] > 1
+    setup_txt = {"invoice": money(q["setup_total"]), "spread": "Over 12 months", "included": "In equipment deal",
+                 "waived": "Waived"}[q["setup_mode"]] if q["setup"] else "None"
+    cover_page(pdf, cfg, cust, f"{B['trading']} for {cust.get('company') or 'your business'}  |  "
+               f"Prepared {date.today().strftime('%d %B %Y')}" + (f" by {prepared_by}" if prepared_by else ""),
+               [("Monthly" + (" (year 1)" if stepped else ""), money(q["monthly_total"])), ("Minimum term", f"{q['term']} months"),
+                ("One-off set-up", setup_txt), ("Starts", "On go-live")],
+               [["Service Order", "2", "Your services, prices and set-up"],
+                ["Price Schedule", "3", "How your monthly charge changes each year"],
+                [f"Terms & Conditions", "4 - {nb}", f"The {B['trading']} terms for the service"]],
+               services=[(l["name"], l["qty"]) for l in q["lines"]], prepared_by=prepared_by, sign=sign)
+    pdf.label = "SERVICE ORDER"
     pdf.add_page()
     today = date.today().strftime("%d %B %Y")
     pdf.doc_title(f"{B['trading']} Service Order", f"Prepared {today}" + (f"  |  by {prepared_by}" if prepared_by else ""))
@@ -333,15 +411,8 @@ def customer_pack(cfg, q, cust, prepared_by="", show_review=False, terms_text=No
     if q["review_pct"] > 0:
         pts.append(f"An annual price review of {q['review_pct']:g}% applies on each anniversary of your start date. "
                    + ("The figures above include it." if show_review else "The figures above are before that review and before VAT."))
-    pts.append(f"Total value of your monthly services over the minimum term: {money(q['services_value_with_review'] if show_review else q['services_value'])}"
-               + (" before the annual review" if (q["review_pct"] > 0 and not show_review) else "") + ".")
     pdf.bullets(pts)
-
-    left = [f"Company:  {cust.get('company', '')}", f"Name:  {cust.get('contact', '')}", f"Position:  {cust.get('position', '')}",
-            "Date:  ____ / ____ / ________", "Signature:  ________________________________"]
-    right = [f"Name:  {_blank(prepared_by)}", f"Date:  {date.today().strftime('%d/%m/%Y')}", "Signature:  ________________________"]
-    pdf.sign_block(f"Agreement - I have read and agree to this Order, the Price Schedule and the {B['trading']} Terms & Conditions",
-                   "For and on behalf of the Customer", left, f"For and on behalf of {B['legal']}", right)
+    signed_note(pdf, "This Order and Price Schedule are accepted by signing the Agreement to go ahead on page 1.")
 
     pdf.label = "TERMS & CONDITIONS"
     terms = parse_terms(terms_text or cfg.get("terms_customer") or CUSTOMER_TERMS, customer_subs(cfg, q))
@@ -351,10 +422,20 @@ def customer_pack(cfg, q, cust, prepared_by="", show_review=False, terms_text=No
 
 
 # ─────────────────────────── PARTNER PACK ───────────────────────────
-def partner_pack(cfg, sim, partner, prepared_by="", white_label=False, terms_text=None):
+def partner_pack(cfg, sim, partner, prepared_by="", white_label=False, terms_text=None, sign=None):
     B, R = cfg["brand"], cfg["reseller"]
     tier = sim["tier"]
     pdf = Doc(B, "PARTNER ORDER")
+    cover_page(pdf, cfg, dict(partner, _kind="partner"),
+               f"{B['trading']} partner agreement for {partner.get('company') or 'your business'}  |  "
+               f"Prepared {date.today().strftime('%d %B %Y')}" + (f" by {prepared_by}" if prepared_by else ""),
+               [("Partner tier", tier["name"]), ("Discount off RRP", f"{sim['discount']:g}%"),
+                ("Commitment", f"{int(tier['commit'])} licences" if tier["commit"] else "None"), ("Partner term", f"{sim['term']} months")],
+               [["Partner Order", "2", "Your tier and wholesale price list"],
+                ["Commitment & tiers", "3", "How your commitment, ramp and tier moves work"],
+                ["Partner Terms", "4 - {nb}", f"The {B['trading']} reseller terms"]],
+               prepared_by=prepared_by, sign=sign)
+    pdf.label = "PARTNER ORDER"
     pdf.add_page()
     today = date.today().strftime("%d %B %Y")
     pdf.doc_title(f"{B['trading']} Partner Order", f"Prepared {today}" + (f"  |  by {prepared_by}" if prepared_by else ""))
@@ -423,11 +504,7 @@ def partner_pack(cfg, sim, partner, prepared_by="", white_label=False, terms_tex
         "You provide first-line support; we support your team (second line) and provide training and sales material.",
         f"We will not approach customers you introduce to sell to them directly (see clause 14 of the Partner Terms).",
     ])
-    left = [f"Company:  {partner.get('company', '')}", f"Name:  {partner.get('contact', '')}", f"Position:  {partner.get('position', '')}",
-            "Date:  ____ / ____ / ________", "Signature:  ________________________________"]
-    right = [f"Name:  {_blank(prepared_by)}", f"Date:  {date.today().strftime('%d/%m/%Y')}", "Signature:  ________________________"]
-    pdf.sign_block(f"Agreement - I have read and agree to this Partner Order, the Wholesale Price List and the {B['trading']} Partner Terms",
-                   "For and on behalf of the Partner", left, f"For and on behalf of {B['legal']}", right)
+    signed_note(pdf, "This Partner Order is accepted by signing the Agreement to go ahead on page 1.")
 
     pdf.label = "PARTNER TERMS"
     terms = parse_terms(terms_text or cfg.get("terms_reseller") or RESELLER_TERMS, reseller_subs(cfg, sim["term"]))
@@ -444,9 +521,12 @@ def partner_roi_pdf(cfg, sim, partner, plan):
     name = partner.get("company") or "your business"
     pdf.doc_title(f"Your {B['trading']} partner opportunity", f"Prepared for {name}  |  {date.today().strftime('%d %B %Y')}")
     T = sim["totals"]
-    pdf.tiles([("Profit over term", money(T["profit"], 0)), ("Return on spend", f"{sim['roi_pct']:.0f}%"),
-               ("Monthly profit by end", money(sim["end_mrr_profit"], 0)),
+    paid = T["wholesale"] + T["shortfall"] + T["fees"]
+    pdf.tiles([("Your customers pay you", money(T["revenue"], 0)), ("You pay Call Scope", money(paid, 0)),
+               ("You keep", money(T["profit"], 0)),
                ("Pays back", f"Month {sim['payback_month']}" if sim["payback_month"] else "Not within term")])
+    pdf.tiles([("Kept per £1 paid to us", f"£{sim['roi_pct'] / 100:.2f}"), ("Kept each month by the end", money(sim["end_mrr_profit"], 0)),
+               ("Customers by the end", f"{sim['end_customers']:.0f}"), ("Partner term", f"{sim['term']} months")])
     pdf.section("The plan behind these numbers")
     pdf.bullets(plan)
     pdf.section("Year by year")
@@ -454,20 +534,21 @@ def partner_roi_pdf(cfg, sim, partner, plan):
     for y in range(0, sim["term"], 12):
         seg = sim["rows"][y:y + 12]
         rev = sum(r["revenue"] for r in seg); cost = sum(r["wholesale"] + r["shortfall"] + r["fees"] for r in seg)
-        rows.append([f"Year {y // 12 + 1}", f"{seg[-1]['customers']:.0f}", f"{seg[-1]['licences']:.0f}", money(rev, 0), money(cost, 0),
+        rows.append([f"Year {y // 12 + 1}", f"{seg[-1]['customers']:.0f}", money(rev, 0), money(cost, 0),
                      money(rev - cost, 0), money(seg[-1]["cumulative"], 0)])
-    pdf.table([("Year", 22, "L"), ("Customers", 22, "R"), ("Licences", 22, "R"), ("Your revenue", 30, "R"), ("Your cost", 28, "R"),
-               ("Profit", 28, "R"), ("Running total", 28, "R")], rows, bold_cols=(5,))
+    pdf.table([("Year", 20, "L"), ("Customers", 22, "R"), ("Customers pay you", 36, "R"), ("You pay Call Scope", 36, "R"),
+               ("You keep", 32, "R"), ("Kept so far", 34, "R")], rows, bold_cols=(4,))
     vals = [sim["rows"][min(len(sim["rows"]) - 1, y + 11)]["cumulative"] for y in range(0, sim["term"], 12)]
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 8); pdf.set_text_color(*INK)
-    pdf.cell(0, 5, "Running profit at the end of each year", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 5, "What you have kept by the end of each year", new_x="LMARGIN", new_y="NEXT")
     pdf.bars([max(0, v) for v in vals], [money(v, 0) for v in vals], [f"Year {i + 1}" for i in range(len(vals))])
     pc = sim["per_customer"]
     pdf.section("Per typical customer")
-    pdf.bullets([f"You charge {money(pc['resale'])} a month and pay us {money(pc['wholesale'])} - "
-                 f"{money(pc['profit'])} profit a month per customer.",
-                 f"Set-up: you charge {money(pc['setup_resale'])} and pay us {money(pc['setup_wholesale'])}."])
+    pdf.bullets([f"Each month you charge each customer {money(pc['resale'])}, pay Call Scope {money(pc['wholesale'])} "
+                 f"and keep {money(pc['profit'])}.",
+                 f"Set-up, once per new customer: you charge {money(pc['setup_resale'])}, pay Call Scope {money(pc['setup_wholesale'])} "
+                 f"and keep {money(pc['setup_resale'] - pc['setup_wholesale'])}."])
     pdf.ln(2)
     pdf.set_font("Helvetica", "I", 7); pdf.set_text_color(*MUTE)
     pdf.multi_cell(180, 3.6, s("Illustrative projection based on the assumptions above. It is not a forecast or a guarantee of results. "
