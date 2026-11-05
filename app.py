@@ -717,11 +717,9 @@ def reseller_mode():
             unit = st.radio("Plan by", ["customers", "users"], horizontal=True, key="p_unit",
                             format_func=lambda u: "Customers (businesses) a month" if u == "customers" else "Users a month")
             one = "customer" if unit == "customers" else "user"
-            c1, c2, c3 = st.columns(3)
+            c1, c2 = st.columns(2)
             start = c1.number_input(f"{unit.capitalize()} at launch", 0, 5000, value=2 if unit == "customers" else 0, step=1, key=f"p_start_{unit}")
             per_month = c2.number_input(f"New {unit} per month", 0, 1000, value=1 if unit == "customers" else 10, step=1, key=f"p_new_{unit}")
-            churn = c3.number_input("Monthly churn %", 0.0, 10.0, value=1.0, step=0.5, key="p_churn",
-                                    help=f"The share of {unit} who leave each month.")
             c1, c2, c3 = st.columns(3)
             resale_disc = c1.slider("Partner's discount to their customers", 0, 40, value=0, step=5, key="p_resale",
                                     help="0% = the partner sells at our RRP.")
@@ -747,7 +745,7 @@ def reseller_mode():
                 mix[m["id"]] = c.number_input(m["name"].replace("AI Integration - ", ""), 0, 100,
                                               value=int(defaults.get(m["id"], 0)), step=1, key=f"p_mix_{unit}_{m['id']}")
 
-    kw = dict(mix=mix, minutes_per_cust=mins, start_customers=start, new_per_month=per_month, churn_pct=churn,
+    kw = dict(mix=mix, minutes_per_cust=mins, start_customers=start, new_per_month=per_month, churn_pct=0.0,
               resale_discount=resale_disc, setup_resale_pct=setup_pct, white_label=white,
               onboarding_mode=onboarding_mode, include_setup=(unit == "customers"), unit=unit)
     sim = simulate_partner(CFG, tier_name, term, **kw)
@@ -762,7 +760,7 @@ def reseller_mode():
     plan = [f"Partner tier: {tier_name} ({sim['discount']:g}% off RRP) on a {term}-month partner term"
             + (f", committing to {int(tier['commit'])} licences" if tier["commit"] else ", no commitment") + ".",
             f"Starts with {start:g} {one if start == 1 else unit} and adds {per_month:g} new {one if per_month == 1 else unit} a month for {term // 12 if term % 12 == 0 else term} "
-            f"{'years' if term % 12 == 0 else 'months'}, with {churn:g}% leaving each month.",
+            f"{'years' if term % 12 == 0 else 'months'}.",
             ("Typical customer: " if unit == "customers" else "Each user takes: ") + ", ".join(f"{v:g} x {next(m['name'] for m in CFG['modules'] if m['id'] == k)}" for k, v in mix.items() if v)
             + (f", {mins:,} AI minutes" if mins else "") + ".",
             f"Sells at {'our RRP' if not resale_disc else f'{resale_disc}% below RRP'}"
