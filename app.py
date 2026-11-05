@@ -744,9 +744,8 @@ def reseller_mode():
             except TypeError:
                 cols = st.columns(len(mods))
             for c, m in zip(cols, mods):
-                mix[m["id"]] = c.number_input(m["name"].replace("AI Integration - ", ""), 0.0, 100.0,
-                                              value=float(defaults.get(m["id"], 0)), step=1.0 if unit == "users" else 0.5,
-                                              format="%.0f" if unit == "users" else "%.1f", key=f"p_mix_{unit}_{m['id']}")
+                mix[m["id"]] = c.number_input(m["name"].replace("AI Integration - ", ""), 0, 100,
+                                              value=int(defaults.get(m["id"], 0)), step=1, key=f"p_mix_{unit}_{m['id']}")
 
     kw = dict(mix=mix, minutes_per_cust=mins, start_customers=start, new_per_month=per_month, churn_pct=churn,
               resale_discount=resale_disc, setup_resale_pct=setup_pct, white_label=white,
