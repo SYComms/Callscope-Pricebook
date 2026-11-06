@@ -28,14 +28,16 @@ except Exception:
     _PAGE = "home"
 if _PAGE != "partners":
     try:
-        from cs_site.site import render_site
+        try:
+            from callscope_website import render_site
+        except ModuleNotFoundError:
+            from cs_site.site import render_site
     except Exception as _e:  # usually the cs_site folder didn't upload to GitHub
         st.set_page_config(page_title="Call Scope", layout="wide")
         _here = os.path.dirname(os.path.abspath(__file__))
-        _need = ["cs_site/__init__.py", "cs_site/site.py", "cs_site/content.py",
-                 "assets/ai_chip.jpg", "assets/crm_ai.jpg", "assets/wallboard.jpg"]
+        _need = ["callscope_website.py", "assets/callscope_logo.png", "assets/dashboard.jpg"]
         _missing = [f for f in _need if not os.path.exists(os.path.join(_here, f))]
-        st.error("The website files aren't in the GitHub repo yet, so the website can't load.")
+        st.error("The website file isn't in the GitHub repo yet - upload callscope_website.py next to app.py.")
         if _missing:
             st.markdown("**Missing from the repo:**\n" + "\n".join(f"- `{f}`" for f in _missing))
         st.caption(f"Technical detail: {type(_e).__name__}: {_e}")
