@@ -1,14 +1,19 @@
 # Call Scope
 
-A Streamlit app with two parts:
+A Streamlit app with three parts:
 
-- **The website (public, no login):** a product landing page with clickable cards. Each module, industry and "How it works"
-  has its own page and its own link, e.g. `?page=ai-call-answer`, `?page=estate-agents`, `?page=how-it-works`.
-  No pricing anywhere. Edit the words in `cs_site/content.py`.
-- **The Partner area (`?page=partners`, password protected):** the quoting tool below. The "Partners" link in the
-  website's top bar goes there.
+- **The website** (public, no login): product landing page with clickable cards and a page for each module, industry
+  and "How it works" (e.g. `?page=ai-call-answer`). No pricing. Words live in `callscope_website.py`.
+- **Partners** (`?page=partners`): each reseller's own quoting tool. Resellers sign in with the email/password you create in
+  Provider > Admin > Partner accounts, quote their customers at their own prices, see their margin and download Call Scope
+  paperwork "supplied by" them. Code: `partner_portal.py`.
+- **Provider** (`?page=provider`): our pricebook - direct customer quotes, reseller agreements, ROI view and Admin
+  (APP_PASSWORD / ADMIN_PASSWORD). The rest of `app.py`.
 
-## Partner area
+Partner accounts are saved in `config.json` (passwords stored as salted hashes). Set GITHUB_TOKEN and GITHUB_REPO in Secrets
+so they survive restarts, and keep the GitHub repo **private**.
+
+## Provider area
 
 The quoting tool has two sides:
 
@@ -61,8 +66,8 @@ cs_core/pricing.py   all the maths (customer schedule, wholesale, partner ROI)
 cs_core/pdfs.py      the PDF paperwork
 cs_core/terms.py     default customer and partner T&Cs (editable in Admin)
 cs_core/zoho.py      Zoho CRM customer look-up (read-only)
-cs_site/content.py   all the website words (modules, industries, how it works)
-cs_site/site.py      the website pages and design
+callscope_website.py the public website (words, pages, design, images)
+partner_portal.py    the Partners area (resellers' own quoting tool)
 assets/              logo and product images
 ```
 

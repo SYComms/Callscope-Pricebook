@@ -21,18 +21,28 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-# ── Public website first: every page except ?page=partners is the product site (no login, no pricing) ──
+# ── Routing ──
+#   ?page=partners  -> Partners area: each reseller's own quoting tool (partner_portal.py)
+#   ?page=provider  -> Provider area: our pricebook, reseller agreements and Admin (the rest of this file)
+#   anything else   -> the public Call Scope website (callscope_website.py) - no login, no pricing
 try:
     _PAGE = str(st.query_params.get("page", "home") or "home")
 except Exception:
     _PAGE = "home"
-if _PAGE != "partners":
+if _PAGE == "partners":
     try:
-        try:
-            from callscope_website import render_site
-        except ModuleNotFoundError:
-            from cs_site.site import render_site
-    except Exception as _e:  # usually the cs_site folder didn't upload to GitHub
+        from partner_portal import run_partner_portal
+    except Exception as _e:
+        st.set_page_config(page_title="Call Scope Partners", layout="wide")
+        st.error("The Partners area file isn't in the GitHub repo yet - upload partner_portal.py next to app.py.")
+        st.caption(f"Technical detail: {type(_e).__name__}: {_e}")
+        st.stop()
+    run_partner_portal()
+    st.stop()
+if _PAGE != "provider":
+    try:
+        from callscope_website import render_site
+    except Exception as _e:  # usually callscope_website.py didn't upload to GitHub
         st.set_page_config(page_title="Call Scope", layout="wide")
         _here = os.path.dirname(os.path.abspath(__file__))
         _need = ["callscope_website.py", "assets/callscope_logo.png", "assets/dashboard.jpg"]
@@ -41,7 +51,7 @@ if _PAGE != "partners":
         if _missing:
             st.markdown("**Missing from the repo:**\n" + "\n".join(f"- `{f}`" for f in _missing))
         st.caption(f"Technical detail: {type(_e).__name__}: {_e}")
-        st.markdown('[Go to the Partner area](?page=partners)')
+        st.markdown('[Go to the Provider area](?page=provider)')
         st.stop()
     render_site(_PAGE)
     st.stop()
@@ -60,7 +70,7 @@ except Exception:
     CANVAS_OK = False
 
 LOGO = os.path.join(ROOT, "assets", "callscope_logo.png")
-st.set_page_config(page_title="Call Scope Partners", page_icon=LOGO, layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Call Scope Provider", page_icon=LOGO, layout="wide", initial_sidebar_state="expanded")
 
 # ─────────────────────────── DESIGN SYSTEM ───────────────────────────
 CSS = """
@@ -263,7 +273,7 @@ def login_gate():
     _, mid, _ = st.columns([1, 1.1, 1])
     with mid:
         render_html(f'<div class="pe-login-head"><img src="data:image/png;base64,{LOGO_B64}">'
-                    '<div class="t">Call Scope Partners</div><div class="s">Partner and sales area - quotes, pricing and paperwork</div></div>')
+                    '<div class="t">Call Scope Provider</div><div class="s">Our pricebook - customer quotes, reseller agreements and settings</div></div>')
         with st.container(key="card-login"):
             if not (app_pw or admin_pw):
                 st.error("This app is locked because no password is set. Add APP_PASSWORD and ADMIN_PASSWORD "
@@ -305,8 +315,8 @@ for _prefix in ("c", "p"):
 
 # ─────────────────────────── SIDEBAR ───────────────────────────
 with st.sidebar:
-    render_html(f'<div class="pe-brand"><img src="data:image/png;base64,{LOGO_B64}"><div><div class="n">{esc(CFG["brand"]["trading"])} Partners</div>'
-                f'<div class="t">{esc(CFG["brand"]["byline"])}</div></div></div>')
+    render_html(f'<div class="pe-brand"><img src="data:image/png;base64,{LOGO_B64}"><div><div class="n">{esc(CFG["brand"]["trading"])} Provider</div>'
+                f'<div class="t">{esc(CFG["brand"]["byline"] or "Provider area")}</div></div></div>')
     st.markdown('<a href="?" target="_self" style="color:#8C98B0;font-size:.85rem;text-decoration:none">&larr; Back to the website</a>',
                 unsafe_allow_html=True)
     modes = ["Customer quote", "Reseller partner", "Admin"]
@@ -1018,10 +1028,8 @@ def admin_unlock():
 def deal_margins():
     lq, ls = st.session_state.get("_last_q"), st.session_state.get("_last_sim")
     st.caption("Internal only. Uses the customer quote and partner plan currently open in this session.")
-    unset = [m["name"] for m in CFG["modules"] if not m.get("buy")]
-    if unset:
-        st.warning("Our own cost isn't set for: " + ", ".join(unset) + ". Margins below treat those as costing £0 - "
-                   "add them in Admin > Services (Our cost £) for true figures.")
+    if any(not m.get("buy") for m in CFG["modules"]):
+        st.caption("Where our own cost isn't set yet (Admin > Services > Our cost £), margins treat it as £0.")
     st.markdown("##### Customer quote" + (f" - {esc(lq['who'])}" if lq and lq.get("who") else ""))
     if lq and lq["q"]["lines"]:
         q = lq["q"]
@@ -1102,6 +1110,114 @@ def zoho_admin():
             st.success("Active for this session.")
 
 
+def persist_cfg(cfg):
+    st.session_state.cfg = cfg
+    ok, msg = save_local(cfg)
+    if secret("GITHUB_TOKEN") and secret("GITHUB_REPO"):
+        ok, msg = save_github(cfg, secret("GITHUB_TOKEN"), secret("GITHUB_REPO"), secret("GITHUB_BRANCH", "main"))
+    return ok, msg
+
+
+def _logo_b64(upload):
+    from PIL import Image
+    im = Image.open(upload).convert("RGBA")
+    im.thumbnail((480, 180))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG", optimize=True)
+    import base64 as _b64
+    return _b64.b64encode(buf.getvalue()).decode()
+
+
+def partner_accounts():
+    """Create and manage reseller logins for the Partners area."""
+    from cs_core.config import hash_password
+    cfg = copy.deepcopy(st.session_state.cfg)
+    parts = cfg.setdefault("partners", [])
+    R = cfg["reseller"]
+    st.markdown("Each reseller signs in to the **Partners** area (`?page=partners` on your app address) with the email and password "
+                "you set here. They quote their own customers at their own prices on Call Scope paperwork that says "
+                "*supplied by* them. They can't see Call Scope's own costs, other partners, Zoho or anything in Provider.")
+    if secret("GITHUB_TOKEN") and secret("GITHUB_REPO"):
+        st.caption("Accounts are saved to config.json in your GitHub repo, with passwords stored scrambled. Keep the repo private.")
+    else:
+        st.warning("Without GITHUB_TOKEN and GITHUB_REPO in Secrets, partner accounts are lost when the app restarts. "
+                   "Add them before creating real logins - and keep the GitHub repo private.")
+    if st.session_state.get("_pa_msg"):
+        ok, msg = st.session_state.pop("_pa_msg")
+        (st.success if ok else st.warning)(msg)
+    if parts:
+        show_df(pd.DataFrame([{"Company": p_.get("company", ""), "Login email": p_.get("email", ""), "Tier": p_.get("tier", ""),
+                               "Partner term": f"{p_.get('term', '')} months", "Active": "Yes" if p_.get("active", True) else "No",
+                               "Logo": "Yes" if p_.get("logo_b64") else "No"} for p_ in parts]))
+    labels = ["+ New partner"] + [f"{p_.get('company', '?')} ({p_.get('email', '')})" for p_ in parts]
+    pick = st.selectbox("Partner", range(len(labels)), format_func=lambda i: labels[i], key="pa_pick")
+    acct = {} if pick == 0 else parts[pick - 1]
+    tiers = [t["name"] for t in R["tiers"]]
+    terms = [int(t["months"]) for t in R["terms"]]
+    with st.form(f"pa_form_{acct.get('id', 'new')}"):
+        c1, c2 = st.columns(2)
+        company = c1.text_input("Company name", acct.get("company", ""))
+        email = c2.text_input("Login email", acct.get("email", ""))
+        contact = c1.text_input("Contact name", acct.get("contact", ""))
+        phone = c2.text_input("Telephone", acct.get("phone", ""))
+        address = st.text_input("Address", acct.get("address", ""))
+        c1, c2, c3 = st.columns(3)
+        tier = c1.selectbox("Tier", tiers, index=tiers.index(acct["tier"]) if acct.get("tier") in tiers else 0)
+        dterm = int(acct.get("term", R.get("default_term", 36)))
+        term = c2.selectbox("Partner term", terms, index=terms.index(dterm) if dterm in terms else 0, format_func=lambda m: f"{m} months")
+        active = c3.checkbox("Active (can sign in)", value=acct.get("active", True))
+        pw = st.text_input("Password (at least 8 characters)" if not acct else "New password - leave blank to keep the current one",
+                           type="password")
+        logo = st.file_uploader("Logo for their paperwork (PNG or JPG)", type=["png", "jpg", "jpeg"])
+        drop_logo = st.checkbox("Remove the current logo") if acct.get("logo_b64") else False
+        go = st.form_submit_button("Create partner" if not acct else "Save partner", type="primary")
+    if go:
+        email_n = email.strip().lower()
+        clash = any((p_.get("email") or "").lower() == email_n and p_.get("id") != acct.get("id") for p_ in parts)
+        if not company.strip() or "@" not in email_n:
+            st.error("Add the company name and a valid login email.")
+        elif clash:
+            st.error("Another partner already uses that login email.")
+        elif not acct and len(pw) < 8:
+            st.error("Set a password of at least 8 characters.")
+        elif acct and pw and len(pw) < 8:
+            st.error("The new password needs at least 8 characters.")
+        else:
+            rec = dict(acct)
+            rec.update({"company": company.strip(), "email": email_n, "contact": contact.strip(), "phone": phone.strip(),
+                        "address": address.strip(), "tier": tier, "term": int(term), "active": bool(active)})
+            if not rec.get("id"):
+                rec["id"] = re.sub(r"[^a-z0-9]+", "-", company.lower()).strip("-")[:30] + "-" + os.urandom(3).hex()
+                rec["created"] = str(date.today())
+            if pw:
+                rec["pw_salt"], rec["pw_hash"] = hash_password(pw)
+            if drop_logo:
+                rec.pop("logo_b64", None)
+            if logo is not None:
+                try:
+                    rec["logo_b64"] = _logo_b64(logo)
+                except Exception as e:
+                    st.error(f"Couldn't read that logo: {e}")
+                    st.stop()
+            if acct:
+                parts[pick - 1] = rec
+            else:
+                parts.append(rec)
+            ok, msg = persist_cfg(cfg)
+            st.session_state["_pa_msg"] = (ok, f"{rec['company']} saved. " + msg)
+            st.session_state.pop("pa_pick", None)
+            st.rerun()
+    if acct:
+        with st.expander("Delete this partner"):
+            sure = st.checkbox(f"Yes, delete {acct.get('company', '')} - they will no longer be able to sign in", key="pa_sure")
+            if st.button("Delete partner", disabled=not sure, key="pa_del"):
+                parts.pop(pick - 1)
+                ok, msg = persist_cfg(cfg)
+                st.session_state["_pa_msg"] = (ok, "Partner deleted. " + msg)
+                st.session_state.pop("pa_pick", None)
+                st.rerun()
+
+
 def admin_mode():
     render_hero("Admin", "Pricebook", "settings", "Margins, prices, tiers, branding, terms and the Zoho connection.",
                 ["Edit", "Save"], 0)
@@ -1110,9 +1226,11 @@ def admin_mode():
         return
     draft = copy.deepcopy(CFG)
     tabs = st.tabs(["Deal margins", "Services", "Customer terms", "Reseller tiers", "Set-up and minutes", "Branding",
-                    "Terms & Conditions", "Zoho", "Save / backup"])
+                    "Terms & Conditions", "Zoho", "Save / backup", "Partner accounts"])
     with tabs[0]:
         deal_margins()
+    with tabs[9]:
+        partner_accounts()
     with tabs[7]:
         zoho_admin()
 
@@ -1219,18 +1337,24 @@ def admin_mode():
         up = st.file_uploader("Restore settings from a config.json", type=["json"])
         if up and st.button("Restore this file"):
             try:
-                st.session_state.cfg = deep_merge(DEFAULTS, json.load(up))
+                _new = deep_merge(DEFAULTS, json.load(up))
+                if not _new.get("partners"):
+                    _new["partners"] = CFG.get("partners", [])
+                st.session_state.cfg = _new
                 st.success("Restored. Press Save to keep it.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Couldn't read that file: {e}")
         if st.button("Reset everything to the built-in defaults"):
-            st.session_state.cfg = copy.deepcopy(DEFAULTS)
+            _new = copy.deepcopy(DEFAULTS)
+            _new["partners"] = CFG.get("partners", [])      # partner logins are kept
+            st.session_state.cfg = _new
             st.rerun()
 
     st.divider()
     c1, c2, _ = st.columns([1, 1, 2])
     if c1.button("Save changes", type="primary", **FULL_WIDTH):
+        draft["partners"] = st.session_state.cfg.get("partners", [])
         st.session_state.cfg = draft
         ok, msg = save_local(draft)
         if secret("GITHUB_TOKEN") and secret("GITHUB_REPO"):

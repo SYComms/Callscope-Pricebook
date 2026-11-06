@@ -10,11 +10,8 @@ import streamlit as st
 # ═══════════════════════════ CONTENT (edit the words here) ═══════════════════════════
 BRAND = {
     "tagline": "Every conversation. Captured. Analysed. Actioned.",
-    "email": "hello@sycomms.co.uk",
-    "phone": "01743 667419",
-    "phone_link": "+441743667419",
-    "video": "https://callscope-sycomms.streamlit.app/",
-    "offices": "Shrewsbury  ·  Anglesey  ·  Gnosall",
+    "email": "hello@callscope.co.uk",
+    "website": "callscope.co.uk",
     "crms": ["Salesforce", "HubSpot", "Zoho", "Microsoft Dynamics", "Pipedrive", "Bespoke systems"],
 }
 
@@ -450,12 +447,13 @@ def demo_href(subject="Call Scope demo"):
 
 def nav():
     return (f'<div class="cs-nav"><a class="cs-logo" href="?" target="_self"><img src="{img("callscope_logo.png")}" alt="Call Scope">'
-            '<div><b>Call Scope</b><span>by SY Comms</span></div></a>'
+            '<div><b>Call Scope</b><span>AI call intelligence</span></div></a>'
             '<div class="cs-links">'
             f'<a class="hide-m" href="?page=features" target="_self">Features</a>'
             f'<a class="hide-m" href="?page=how-it-works" target="_self">How it works</a>'
             f'<a class="hide-m" href="?page=industries" target="_self">Industries</a>'
             f'<a href="?page=partners" target="_self"><span class="cs-lk">{ICONS["lock"]}</span>Partners</a>'
+            f'<a class="hide-m" href="?page=provider" target="_self">Provider</a>'
             f'<a class="cs-btn pri sm" href="{demo_href()}" target="_blank">Book a demo</a></div></div>')
 
 
@@ -467,17 +465,17 @@ def card(page, icon, title, text, more="Explore"):
 def cta(title="See Call Scope working with your phone system.", sub="Book a demo and we'll show you it running on real calls."):
     return (f'<div class="cs-cta"><div><h2>{E(title)}</h2><p>{E(sub)}</p></div><div class="cs-ctas">'
             f'<a class="cs-btn pri" href="{demo_href()}" target="_blank">{ICONS["mail"]}Book a demo</a>'
-            f'<a class="cs-btn" href="tel:{BRAND["phone_link"]}">{ICONS["phone"]}{E(BRAND["phone"])}</a></div></div>')
+            f'<a class="cs-btn" href="?page=how-it-works" target="_self">How it works {ICONS["arrow"]}</a></div></div>')
 
 
 def footer():
     mods = "".join(f'<a href="{link(m["id"])}" target="_self">{E(m["name"])}</a>' for m in MODULES[:6])
     inds = "".join(f'<a href="{link(i["id"])}" target="_self">{E(i["name"])}</a>' for i in INDUSTRIES)
-    return (f'<div class="cs-foot"><div><b>Call Scope</b> by SY Comms<br>{E(BRAND["tagline"])}<br><br>'
-            f'<a href="tel:{BRAND["phone_link"]}">{E(BRAND["phone"])}</a> &nbsp;·&nbsp; <a href="mailto:{BRAND["email"]}">{E(BRAND["email"])}</a>'
-            f'<br>{E(BRAND["offices"])}</div><div class="cols"><div><b>Modules</b>{mods}</div><div><b>Industries</b>{inds}</div>'
+    return (f'<div class="cs-foot"><div><b>Call Scope</b><br>{E(BRAND["tagline"])}<br><br>'
+            f'<a href="mailto:{BRAND["email"]}">{E(BRAND["email"])}</a><br>{E(BRAND["website"])}</div>'
+            f'<div class="cols"><div><b>Modules</b>{mods}</div><div><b>Industries</b>{inds}</div>'
             f'<div><b>More</b><a href="?page=how-it-works" target="_self">How it works</a><a href="?page=wallboards" target="_self">Live wallboards</a>'
-            f'<a href="{BRAND["video"]}" target="_blank">Watch the video</a><a href="?page=partners" target="_self">Partner login</a></div></div></div>')
+            f'<a href="?page=partners" target="_self">Partner login</a><a href="?page=provider" target="_self">Provider</a></div></div></div>')
 
 
 def section_head(kick, title, sub="", right=""):
@@ -512,7 +510,7 @@ def page_home():
       <p class="cs-lead">Your business has thousands of customer conversations every month. Call Scope captures each one,
       understands it with AI, and turns it into notes, actions and live insight - automatically.</p>
       <div class="cs-ctas"><a class="cs-btn pri" href="{demo_href()}" target="_blank">{ICONS['mail']}Book a demo</a>
-      <a class="cs-btn" href="{BRAND['video']}" target="_blank">{ICONS['play']}Watch the video</a></div>
+      <a class="cs-btn" href="?page=how-it-works" target="_self">See how it works {ICONS['arrow']}</a></div>
       <div class="cs-trust">Connects with {crms}</div>
     </div><div class="cs-shot"><img src="{img('dashboard.jpg')}" alt="Call Scope dashboard"></div></div>
 
@@ -551,7 +549,7 @@ def page_detail(m):
       <div class="cs-eye">{E(m['name'])}</div><div class="cs-h1 d" role="heading" aria-level="1">{E(m['headline'])}</div>
       <p class="cs-lead">{E(m['lead'])}</p>
       <div class="cs-ctas"><a class="cs-btn pri" href="{demo_href('Call Scope demo - ' + m['name'])}" target="_blank">{ICONS['mail']}Book a demo</a>
-      <a class="cs-btn" href="{BRAND['video']}" target="_blank">{ICONS['play']}Watch the video</a></div></div>
+      <a class="cs-btn" href="?page=how-it-works" target="_self">How it works {ICONS['arrow']}</a></div></div>
       <div class="cs-shot"><img src="{img(m['image'])}" alt="{E(m['name'])}"></div></div>
     <div class="cs-sec">{section_head("What it does", f"Inside <span>{E(m['name'])}</span>")}<div class="cs-grid g3">{feats}</div></div>
     <div class="cs-sec"><div class="cs-panel"><div class="cs-split" style="gap:30px"><div>
