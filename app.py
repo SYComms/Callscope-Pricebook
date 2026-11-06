@@ -21,6 +21,16 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
+# ── Public website first: every page except ?page=partners is the product site (no login, no pricing) ──
+try:
+    _PAGE = str(st.query_params.get("page", "home") or "home")
+except Exception:
+    _PAGE = "home"
+if _PAGE != "partners":
+    from cs_site.site import render_site
+    render_site(_PAGE)
+    st.stop()
+
 from cs_core.config import DEFAULTS, ROOT, load_config, config_json, save_local, save_github, deep_merge
 from cs_core.pricing import (money, customer_quote, max_discount_for, wholesale_list, simulate_partner,
                              compare_tiers, tier_by_name)
@@ -35,7 +45,7 @@ except Exception:
     CANVAS_OK = False
 
 LOGO = os.path.join(ROOT, "assets", "callscope_logo.png")
-st.set_page_config(page_title="Call Scope Pricebook", page_icon=LOGO, layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="Call Scope Partners", page_icon=LOGO, layout="wide", initial_sidebar_state="expanded")
 
 # ─────────────────────────── DESIGN SYSTEM ───────────────────────────
 CSS = """
@@ -238,7 +248,7 @@ def login_gate():
     _, mid, _ = st.columns([1, 1.1, 1])
     with mid:
         render_html(f'<div class="pe-login-head"><img src="data:image/png;base64,{LOGO_B64}">'
-                    '<div class="t">Call Scope Pricebook</div><div class="s">Customer quotes and partner pricing</div></div>')
+                    '<div class="t">Call Scope Partners</div><div class="s">Partner and sales area - quotes, pricing and paperwork</div></div>')
         with st.container(key="card-login"):
             if not (app_pw or admin_pw):
                 st.error("This app is locked because no password is set. Add APP_PASSWORD and ADMIN_PASSWORD "
@@ -258,6 +268,8 @@ def login_gate():
                     st.stop()
                 st.session_state.prepared_by = name.strip()
                 st.rerun()
+        render_html('<div style="text-align:center;margin-top:6px"><a href="?" target="_self" style="color:#8C98B0;font-size:.88rem;'
+                    'text-decoration:none">&larr; Back to the Call Scope website</a></div>')
     st.stop()
 
 
@@ -278,8 +290,10 @@ for _prefix in ("c", "p"):
 
 # ─────────────────────────── SIDEBAR ───────────────────────────
 with st.sidebar:
-    render_html(f'<div class="pe-brand"><img src="data:image/png;base64,{LOGO_B64}"><div><div class="n">{esc(CFG["brand"]["trading"])} Pricebook</div>'
+    render_html(f'<div class="pe-brand"><img src="data:image/png;base64,{LOGO_B64}"><div><div class="n">{esc(CFG["brand"]["trading"])} Partners</div>'
                 f'<div class="t">{esc(CFG["brand"]["byline"])}</div></div></div>')
+    st.markdown('<a href="?" target="_self" style="color:#8C98B0;font-size:.85rem;text-decoration:none">&larr; Back to the website</a>',
+                unsafe_allow_html=True)
     modes = ["Customer quote", "Reseller partner", "Admin"]
     mode = st.radio("Workspace", modes, key="mode")
     st.text_input("Prepared by", key="prepared_by")
@@ -515,7 +529,7 @@ def customer_mode():
             terms = [int(t["months"]) for t in CFG["customer_terms"]]
             c1, c2 = st.columns(2)
             if st.session_state.get("c_term") not in terms:
-                st.session_state.c_term = terms[-1]
+                st.session_state.c_term = 60 if 60 in terms else terms[-1]
             term = c1.selectbox("Minimum term", terms, key="c_term", format_func=lambda m: f"{m} months")
             maxd = int(max_discount_for(CFG, term))
             if st.session_state.get("c_disc", 0) > maxd:
@@ -686,7 +700,7 @@ def reseller_mode():
             tier_name = st.radio("Partner tier", names, key="p_tier", horizontal=True)
             tier = tier_by_name(CFG, tier_name)
             render_html("".join([
-                chip(f"{tier['discount']:g}% off RRP", "accent"),
+                chip(f"{tier['discount']:g}% off partner prices" if tier["discount"] else "Partner list prices", "accent"),
                 chip(f"Commit {int(tier['commit'])} licences" if tier["commit"] else "No commitment"),
                 chip(f"Onboarding {money(tier['onboarding'], 0)}" if tier["onboarding"] else "Onboarding free", "" if tier["onboarding"] else "good"),
                 chip("White label included", "good") if tier.get("white_label") else ""]))
@@ -729,12 +743,12 @@ def reseller_mode():
                 mins = c3.selectbox("Minutes per customer", [0] + list(mc["bundles"]), index=1, key="p_mins",
                                     format_func=lambda m: "None" if not m else f"{m:,} mins")
                 st.markdown("**Typical customer** - modules per customer, on average")
-                defaults = {"portal": 5, "crm": 0, "dashboard": 1, "callscore": 3, "receptionist": 0, "widget": 0}
+                defaults = {"transcribe": 5, "dashboard": 1, "crm": 0, "receptionist": 0, "callscore": 3, "recportal": 1, "widget": 0}
             else:
                 setup_pct, mins = 100, 0
                 c2.caption("Per-user plan: set-up fees and minute bundles are left out - they're per business, not per user.")
                 st.markdown("**Each user takes** - modules per user")
-                defaults = {"portal": 1, "crm": 0, "dashboard": 0, "callscore": 1, "receptionist": 0, "widget": 0}
+                defaults = {"transcribe": 1, "dashboard": 0, "crm": 0, "receptionist": 0, "callscore": 1, "recportal": 0, "widget": 0}
             mix = {}
             mods = CFG["modules"]
             try:
@@ -742,7 +756,8 @@ def reseller_mode():
             except TypeError:
                 cols = st.columns(len(mods))
             for c, m in zip(cols, mods):
-                mix[m["id"]] = c.number_input(m["name"].replace("AI Integration - ", ""), 0, 100,
+                mix[m["id"]] = c.number_input({"transcribe": "Transcribe", "dashboard": "Dashboard", "crm": "CRM", "receptionist": "Call Answer",
+                                               "callscore": "Call Score", "recportal": "Rec. portal", "widget": "Widget"}.get(m["id"], m["name"]), 0, 100,
                                               value=int(defaults.get(m["id"], 0)), step=1, key=f"p_mix_{unit}_{m['id']}")
 
     kw = dict(mix=mix, minutes_per_cust=mins, start_customers=start, new_per_month=per_month, churn_pct=0.0,
@@ -757,7 +772,7 @@ def reseller_mode():
     build = lambda sign=None: partner_pack(CFG, sim, partner, prepared, white, sign=sign)
     blank_pdf = build()
 
-    plan = [f"Partner tier: {tier_name} ({sim['discount']:g}% off RRP) on a {term}-month partner term"
+    plan = [f"Partner tier: {tier_name} (" + (f"{sim['discount']:g}% off partner prices" if sim["discount"] else "partner list prices") + f") on a {term}-month partner term"
             + (f", committing to {int(tier['commit'])} licences" if tier["commit"] else ", no commitment") + ".",
             f"Starts with {start:g} {one if start == 1 else unit} and adds {per_month:g} new {one if per_month == 1 else unit} a month for {term // 12 if term % 12 == 0 else term} "
             f"{'years' if term % 12 == 0 else 'months'}.",
@@ -777,7 +792,7 @@ def reseller_mode():
                             + ("Nothing to pay until they sell" if (not tier["commit"] and (not tier["onboarding"] or onboarding_mode != "charge"))
                                else f"{money(tier['onboarding'] if onboarding_mode == 'charge' else 0, 0)} on signing") + '</div>')
             bonus = sim["discount"] - float(tier["discount"])
-            disc_chip = chip(f"{sim['discount']:g}% off RRP", "good") + (chip(f"incl. +{bonus:g}% for {term} months") if bonus else "")
+            disc_chip = (chip(f"{sim['discount']:g}% off partner prices", "good") if sim["discount"] else chip("Partner list prices", "good")) + (chip(f"incl. +{bonus:g}% for {term} months") if bonus else "")
             render_html(f'<div style="margin:8px 0 10px">{chip(tier_name, "accent")}{disc_chip}{chip(f"{term} months")}</div>')
             hit = sim["commit_hit_month"]
             commit_txt = ("None - pay as you go" if not tier["commit"] else (f"Reached month {hit}" if hit else "Not reached"))
@@ -824,7 +839,7 @@ def reseller_mode():
                    + ", ".join(f"{s['name']} {money(s['wholesale'], 0)} (RRP {money(s['rrp'], 0)})" for s in CFG["setup"]) + ".")
         fl = [w["name"] for w in wl if w["floored"]]
         if fl:
-            st.info("Held at our floor price (cost + " + f"{CFG['reseller']['floor_margin_pct']:g}%): " + ", ".join(fl)
+            st.info("Held at our floor price (our cost + " + f"{CFG['reseller']['floor_margin_pct']:g}%): " + ", ".join(fl)
                     + ". These carry less discount than the tier headline.")
     else:
         st.caption("The pack: page 1 Agreement to go ahead (the only signature) - Partner Order - Commitment & tiers - Partner Terms.")
@@ -988,6 +1003,10 @@ def admin_unlock():
 def deal_margins():
     lq, ls = st.session_state.get("_last_q"), st.session_state.get("_last_sim")
     st.caption("Internal only. Uses the customer quote and partner plan currently open in this session.")
+    unset = [m["name"] for m in CFG["modules"] if not m.get("buy")]
+    if unset:
+        st.warning("Our own cost isn't set for: " + ", ".join(unset) + ". Margins below treat those as costing £0 - "
+                   "add them in Admin > Services (Our cost £) for true figures.")
     st.markdown("##### Customer quote" + (f" - {esc(lq['who'])}" if lq and lq.get("who") else ""))
     if lq and lq["q"]["lines"]:
         q = lq["q"]
@@ -1083,14 +1102,17 @@ def admin_mode():
         zoho_admin()
 
     with tabs[1]:
-        st.caption("Monthly modules. Buy = our cost. RRP = standard customer price. Licence = counts towards a reseller's commitment.")
-        df = pd.DataFrame(draft["modules"])[["id", "name", "unit", "buy", "rrp", "discountable", "counts_to_commit", "blurb"]]
+        st.caption("Monthly modules. Our cost = what Call Scope pays (0 = not set yet). Partner price = what a Bronze reseller pays. "
+                   "RRP = standard customer price. Licence = counts towards a reseller's commitment.")
+        _mods = [dict({"wholesale": m.get("rrp", 0)}, **m) for m in draft["modules"]]
+        df = pd.DataFrame(_mods)[["id", "name", "unit", "buy", "wholesale", "rrp", "discountable", "counts_to_commit", "blurb"]]
         ed = st.data_editor(df, num_rows="dynamic", key="ad_mods", hide_index=True,
                             column_config={"id": st.column_config.TextColumn("ID", help="Short unique code, no spaces"),
-                                           "buy": st.column_config.NumberColumn("Buy £", format="%.2f"),
+                                           "buy": st.column_config.NumberColumn("Our cost £", format="%.2f"),
+                                           "wholesale": st.column_config.NumberColumn("Partner price £", format="%.2f"),
                                            "rrp": st.column_config.NumberColumn("RRP £", format="%.2f"),
                                            "discountable": "Discountable", "counts_to_commit": "Licence"})
-        draft["modules"] = [r for r in ed.fillna({"unit": "", "blurb": "", "discountable": True, "counts_to_commit": True}).to_dict("records")
+        draft["modules"] = [r for r in ed.fillna({"unit": "", "blurb": "", "discountable": True, "counts_to_commit": True, "buy": 0.0}).to_dict("records")
                             if str(r.get("id") or "").strip() and str(r.get("name") or "").strip()]
 
     with tabs[2]:
@@ -1107,7 +1129,7 @@ def admin_mode():
 
     with tabs[3]:
         R = draft["reseller"]
-        st.caption("Commitment = licences the partner commits to. Discount = % off RRP. White label = included free in that tier.")
+        st.caption("Commitment = licences the partner commits to. Discount = extra % off the partner price list. White label = included free in that tier.")
         ed = st.data_editor(pd.DataFrame(R["tiers"])[["name", "commit", "discount", "onboarding", "white_label", "note"]],
                             num_rows="dynamic", key="ad_tiers", hide_index=True,
                             column_config={"commit": st.column_config.NumberColumn("Commitment", step=5),

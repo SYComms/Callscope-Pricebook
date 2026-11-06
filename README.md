@@ -1,6 +1,16 @@
-# Call Scope Pricebook
+# Call Scope
 
-Stand-alone quoting app for **Call Scope**, with two sides:
+A Streamlit app with two parts:
+
+- **The website (public, no login):** a product landing page with clickable cards. Each module, industry and "How it works"
+  has its own page and its own link, e.g. `?page=ai-call-answer`, `?page=estate-agents`, `?page=how-it-works`.
+  No pricing anywhere. Edit the words in `cs_site/content.py`.
+- **The Partner area (`?page=partners`, password protected):** the quoting tool below. The "Partners" link in the
+  website's top bar goes there.
+
+## Partner area
+
+The quoting tool has two sides:
 
 | Workspace | What it does | Paperwork |
 |---|---|---|
@@ -51,6 +61,8 @@ cs_core/pricing.py   all the maths (customer schedule, wholesale, partner ROI)
 cs_core/pdfs.py      the PDF paperwork
 cs_core/terms.py     default customer and partner T&Cs (editable in Admin)
 cs_core/zoho.py      Zoho CRM customer look-up (read-only)
+cs_site/content.py   all the website words (modules, industries, how it works)
+cs_site/site.py      the website pages and design
 assets/              logo and product images
 ```
 
