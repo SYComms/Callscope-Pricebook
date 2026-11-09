@@ -6,6 +6,7 @@ They never see Call Scope's own costs, other partners, Zoho or the Provider tool
 """
 import base64
 import copy
+import json
 import html as html_lib
 import inspect
 import io
@@ -28,6 +29,7 @@ except Exception:
     CANVAS_OK = False
 
 LOGO = os.path.join(ROOT, "assets", "callscope_logo.png")
+PQ_PREFIXES = ("pc_", "pq_", "ps_", "pss_")     # every input on a partner quote
 
 CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
@@ -483,6 +485,14 @@ def run_partner_portal():
     if not acct:
         st.session_state.pop("partner_id", None)
         login(cfg)
+    pending = st.session_state.pop("_pending_pquote", None)     # applied before any input box is drawn
+    if pending:
+        for k, v in (pending.get("values") or {}).items():
+            if isinstance(k, str) and k.startswith(PQ_PREFIXES):
+                st.session_state[k] = v
+        st.session_state["pmode"] = "New quote"
+        who = (pending.get("values") or {}).get("pc_company")
+        st.session_state["_pq_msg"] = "Quote loaded" + (f" for {who}" if who else "") + (f", saved {pending['saved']}" if pending.get("saved") else "") + "."
     with st.sidebar:
         logo = acct.get("logo_b64")
         render_html('<div class="pe-brand">'
@@ -492,6 +502,27 @@ def run_partner_portal():
                     unsafe_allow_html=True)
         mode = st.radio("Workspace", ["New quote", "My price list"], key="pmode")
         st.text_input("Prepared by", key="partner_user_name", placeholder=acct.get("contact", ""))
+        with st.expander("Save / load quote"):
+            vals = {k: v for k, v in st.session_state.items()
+                    if isinstance(k, str) and k.startswith(PQ_PREFIXES) and isinstance(v, (str, int, float, bool))}
+            snap = {"kind": "callscope-partner-quote", "partner": acct.get("id"), "saved": str(date.today()), "values": vals}
+            st.download_button("Save this quote", data=json.dumps(snap, indent=2),
+                               file_name=f"CallScope_{safe_file(vals.get('pc_company') or 'quote')}_{date.today()}.json",
+                               mime="application/json", key="pdl_quote", **FULL_WIDTH,
+                               help="Downloads a small file with every input on this quote. Load it later to carry on.")
+            up = st.file_uploader("Load a saved quote", type=["json"], key=f"_pqup_{st.session_state.get('_pqu_reset', 0)}")
+            if up is not None:
+                try:
+                    data = json.load(up)
+                    if data.get("kind") != "callscope-partner-quote":
+                        raise ValueError("this isn't a Call Scope partner quote file")
+                    st.session_state["_pending_pquote"] = data
+                    st.session_state["_pqu_reset"] = st.session_state.get("_pqu_reset", 0) + 1
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Couldn't load that file: {e}")
+        if st.session_state.get("_pq_msg"):
+            st.success(st.session_state.pop("_pq_msg"))
         render_html(chip(f"{acct.get('tier', 'Bronze')} partner", "accent") + chip(f"{acct.get('term', 36)}-month term"))
         st.divider()
         if st.button("Start a new quote", **FULL_WIDTH):
