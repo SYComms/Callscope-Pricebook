@@ -334,6 +334,33 @@ IS_ADMIN = st.session_state.role == "admin"
 ZH = Zoho(lambda k: secret(k), st.session_state)
 
 # values pulled from Zoho are applied here, before the input boxes are drawn
+# ── Save / load quote ── a quote file is every input of the current workspace, as JSON
+QUOTE_AREAS = {"Customer quote": ("customer", ("c_", "q_")), "Reseller partner": ("reseller", ("p_",))}
+QUOTE_SKIP = {"c_view", "p_view"}
+
+
+def quote_snapshot(mode_name):
+    area, prefixes = QUOTE_AREAS[mode_name]
+    vals = {k: v for k, v in st.session_state.items()
+            if isinstance(k, str) and k.startswith(prefixes) and k not in QUOTE_SKIP
+            and isinstance(v, (str, int, float, bool)) and v is not None}
+    return {"kind": "callscope-quote", "area": area, "saved": str(date.today()),
+            "prepared_by": st.session_state.get("prepared_by", ""), "values": vals}
+
+
+_pending = st.session_state.pop("_pending_quote", None)     # applied before any input box is drawn
+if _pending:
+    _area = _pending.get("area")
+    _prefixes = next((pre for name, (a, pre) in QUOTE_AREAS.items() if a == _area), ())
+    for _k, _v in (_pending.get("values") or {}).items():
+        if isinstance(_k, str) and _k.startswith(_prefixes) and _k not in QUOTE_SKIP:
+            st.session_state[_k] = _v
+    st.session_state["mode"] = next(name for name, (a, _) in QUOTE_AREAS.items() if a == _area)
+    st.session_state["_quote_loaded_msg"] = (f"Loaded the {_area} quote"
+                                             + (f" for {_pending['values'].get('c_company') or _pending['values'].get('p_company')}"
+                                                if (_pending.get('values') or {}).get('c_company') or (_pending.get('values') or {}).get('p_company') else "")
+                                             + (f", saved {_pending.get('saved')}" if _pending.get("saved") else "") + ".")
+
 for _prefix in ("c", "p"):
     _fill = st.session_state.pop(f"_zfill_{_prefix}", None)
     if _fill:
@@ -349,6 +376,27 @@ with st.sidebar:
     modes = ["Customer quote", "Reseller partner", "Admin"]
     mode = st.radio("Workspace", modes, key="mode")
     st.text_input("Prepared by", key="prepared_by")
+    if mode in QUOTE_AREAS:
+        with st.expander("Save / load quote"):
+            snap = quote_snapshot(mode)
+            who = snap["values"].get("c_company") or snap["values"].get("p_company") or "quote"
+            st.download_button("Save this quote", data=json.dumps(snap, indent=2), file_name=f"CallScope_{safe_file(who)}_{date.today()}.json",
+                               mime="application/json", key="dl_quote", **FULL_WIDTH,
+                               help="Downloads a small file with every input on this quote. Load it later to carry on.")
+            _qk = f"quote_up_{st.session_state.get('_qu_reset', 0)}"
+            up = st.file_uploader("Load a saved quote", type=["json"], key=_qk)
+            if up is not None:
+                try:
+                    data = json.load(up)
+                    if data.get("kind") != "callscope-quote" or data.get("area") not in ("customer", "reseller"):
+                        raise ValueError("this isn't a Call Scope Provider quote file")
+                    st.session_state["_pending_quote"] = data
+                    st.session_state["_qu_reset"] = st.session_state.get("_qu_reset", 0) + 1
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Couldn't load that file: {e}")
+    if st.session_state.get("_quote_loaded_msg"):
+        st.success(st.session_state.pop("_quote_loaded_msg"))
     st.caption("Signed in as " + ("admin" if IS_ADMIN else "sales") + (" - Zoho connected" if ZH.configured() else ""))
     st.divider()
     if st.button("Start a new quote", **FULL_WIDTH):
