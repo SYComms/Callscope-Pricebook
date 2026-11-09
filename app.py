@@ -29,12 +29,38 @@ try:
     _PAGE = str(st.query_params.get("page", "home") or "home")
 except Exception:
     _PAGE = "home"
+def _repo_check():
+    """Which files in the GitHub repo are missing or still the old version -> list of plain-English problems."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    checks = [("partner_portal.py", "main folder", "def run_partner_portal"),
+              ("callscope_website.py", "main folder", "def render_site"),
+              ("cs_core/config.py", "cs_core folder", "def verify_password"),
+              ("cs_core/pdfs.py", "cs_core folder", "def supplier_panel"),
+              ("cs_core/pricing.py", "cs_core folder", '"list": r2(base)')]
+    out = []
+    for f, where, marker in checks:
+        path = os.path.join(here, f)
+        if not os.path.exists(path):
+            out.append(f"`{f}` is missing - upload it to the {where}")
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                if marker not in fh.read():
+                    out.append(f"`{f}` is an old version - upload the new one to the {where}")
+        except Exception:
+            pass
+    return out
+
+
 if _PAGE == "partners":
     try:
         from partner_portal import run_partner_portal
     except Exception as _e:
         st.set_page_config(page_title="Call Scope Partners", layout="wide")
-        st.error("The Partners area file isn't in the GitHub repo yet - upload partner_portal.py next to app.py.")
+        _probs = _repo_check()
+        st.error("The Partners area can't start because some files in the GitHub repo are missing or out of date.")
+        if _probs:
+            st.markdown("**To fix:**\n" + "\n".join(f"- {x}" for x in _probs))
         st.caption(f"Technical detail: {type(_e).__name__}: {_e}")
         st.stop()
     run_partner_portal()
@@ -44,12 +70,10 @@ if _PAGE != "provider":
         from callscope_website import render_site
     except Exception as _e:  # usually callscope_website.py didn't upload to GitHub
         st.set_page_config(page_title="Call Scope", layout="wide")
-        _here = os.path.dirname(os.path.abspath(__file__))
-        _need = ["callscope_website.py", "assets/callscope_logo.png", "assets/dashboard.jpg"]
-        _missing = [f for f in _need if not os.path.exists(os.path.join(_here, f))]
-        st.error("The website file isn't in the GitHub repo yet - upload callscope_website.py next to app.py.")
-        if _missing:
-            st.markdown("**Missing from the repo:**\n" + "\n".join(f"- `{f}`" for f in _missing))
+        _probs = _repo_check()
+        st.error("The website can't start because some files in the GitHub repo are missing or out of date.")
+        if _probs:
+            st.markdown("**To fix:**\n" + "\n".join(f"- {x}" for x in _probs))
         st.caption(f"Technical detail: {type(_e).__name__}: {_e}")
         st.markdown('[Go to the Provider area](?page=provider)')
         st.stop()
@@ -71,6 +95,9 @@ except Exception:
 
 LOGO = os.path.join(ROOT, "assets", "callscope_logo.png")
 st.set_page_config(page_title="Call Scope Provider", page_icon=LOGO, layout="wide", initial_sidebar_state="expanded")
+_PROBS = _repo_check()
+if _PROBS:
+    st.warning("Some files in the GitHub repo are missing or out of date:\n" + "\n".join(f"- {x}" for x in _PROBS))
 
 # ─────────────────────────── DESIGN SYSTEM ───────────────────────────
 CSS = """
