@@ -7,8 +7,11 @@ to the defaults below.
 """
 import base64
 import copy
+import hashlib
+import hmac
 import json
 import os
+import secrets
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(ROOT, "config.json")
@@ -17,36 +20,40 @@ DEFAULTS = {
     "version": 1,
     "brand": {
         "trading": "Call Scope",
-        "byline": "by SY Comms",
+        "byline": "",
         "tag": "Every conversation. More intelligence.",
-        "legal": "SY Comms Ltd",
+        "legal": "Call Scope Ltd",
         "address": "Suite C Jupiter House, Sitka Drive, Shrewsbury Business Park, Shrewsbury SY2 6LG",
-        "email": "hello@sycomms.co.uk",
+        "email": "hello@callscope.co.uk",
         "phone": "",
-        "website": "callscope.sycomms.cloud",
+        "website": "callscope.co.uk",
         "accent": "#7870E8",
         "navy": "#101938",
     },
-    # Monthly modules. buy = our cost, rrp = standard customer price (per unit, per month).
+    # Monthly modules. buy = our own cost (0 = not set), wholesale = partner (reseller buy) price at Bronze,
+    # rrp = standard customer price (per unit, per month).
     # discountable: whether the customer introductory discount applies.
     # counts_to_commit: whether it counts as a "licence" towards a reseller's commitment.
     "modules": [
-        {"id": "portal", "name": "AI Integration - Portal", "unit": "per user", "buy": 5.00, "rrp": 32.00,
+        {"id": "transcribe", "name": "AI Transcribe", "unit": "per user", "buy": 0.00, "wholesale": 8.00, "rrp": 29.00,
          "discountable": True, "counts_to_commit": True,
-         "blurb": "Every call transcribed, summarised and searchable in the Call Scope portal."},
-        {"id": "crm", "name": "AI Integration - CRM", "unit": "per user", "buy": 5.00, "rrp": 35.00,
-         "discountable": True, "counts_to_commit": True,
-         "blurb": "Call summaries and actions written straight into your CRM."},
-        {"id": "dashboard", "name": "Manager Dashboard", "unit": "per manager", "buy": 5.00, "rrp": 59.00,
+         "blurb": "Every call transcribed and summarised automatically, ready to search and share."},
+        {"id": "dashboard", "name": "Manager Dashboard", "unit": "per manager", "buy": 0.00, "wholesale": 18.00, "rrp": 59.00,
          "discountable": True, "counts_to_commit": True,
          "blurb": "Live team performance, missed-call recovery and trends for managers."},
-        {"id": "callscore", "name": "Call Score", "unit": "per user", "buy": 20.00, "rrp": 45.00,
+        {"id": "crm", "name": "CRM Integration", "unit": "per user", "buy": 0.00, "wholesale": 5.00, "rrp": 15.00,
          "discountable": True, "counts_to_commit": True,
-         "blurb": "Every call scored against your own standards, with coaching notes."},
-        {"id": "receptionist", "name": "AI Receptionist", "unit": "per receptionist", "buy": 69.00, "rrp": 89.00,
+         "blurb": "Call notes, summaries and actions written straight into your CRM."},
+        {"id": "receptionist", "name": "AI Call Answer", "unit": "per AI receptionist", "buy": 0.00, "wholesale": 49.00, "rrp": 99.00,
          "discountable": True, "counts_to_commit": True,
          "blurb": "Answers, qualifies and routes calls 24/7 in your business's voice."},
-        {"id": "widget", "name": "Website Widget", "unit": "per website", "buy": 30.00, "rrp": 50.00,
+        {"id": "callscore", "name": "AI Call Score", "unit": "per user", "buy": 20.00, "wholesale": 29.25, "rrp": 45.00,
+         "discountable": True, "counts_to_commit": True,
+         "blurb": "Every call scored against your own standards, with coaching notes."},
+        {"id": "recportal", "name": "Call Recording & Transcribe Portal", "unit": "per business", "buy": 0.00, "wholesale": 29.00, "rrp": 49.00,
+         "discountable": True, "counts_to_commit": True,
+         "blurb": "Every call recorded and transcribed in one secure, searchable portal."},
+        {"id": "widget", "name": "Website Widget", "unit": "per website", "buy": 30.00, "wholesale": 37.50, "rrp": 50.00,
          "discountable": True, "counts_to_commit": False,
          "blurb": "Let website visitors talk to your AI receptionist from any page."},
     ],
@@ -57,7 +64,7 @@ DEFAULTS = {
     "setup": [
         {"id": "platform", "name": "Call Scope Platform Setup", "buy": 300.00, "rrp": 500.00, "wholesale": 375.00,
          "auto": "always"},
-        {"id": "rec_setup", "name": "AI Receptionist Setup", "buy": 69.00, "rrp": 100.00, "wholesale": 85.00,
+        {"id": "rec_setup", "name": "AI Call Answer Setup", "buy": 69.00, "rrp": 100.00, "wholesale": 85.00,
          "auto": "per_receptionist"},
         {"id": "agent_setup", "name": "Bespoke AI Agent Build", "buy": 1000.00, "rrp": 2500.00, "wholesale": 1750.00,
          "auto": "optional"},
@@ -79,34 +86,37 @@ DEFAULTS = {
     "notice_days": 90,
     # ---- RESELLER (partner) pricing ----
     "reseller": {
-        # Each tier: committed licences (counted monthly modules) and discount off RRP.
+        # Each tier: committed licences (counted monthly modules) and extra % off the partner price list.
         "tiers": [
-            {"name": "Bronze", "commit": 0, "discount": 30, "onboarding": 495.0, "white_label": False,
+            {"name": "Bronze", "commit": 0, "discount": 0, "onboarding": 495.0, "white_label": False,
              "note": "No commitment - pay as you go"},
-            {"name": "Silver", "commit": 25, "discount": 40, "onboarding": 295.0, "white_label": False,
+            {"name": "Silver", "commit": 25, "discount": 5, "onboarding": 295.0, "white_label": False,
              "note": "Commit to 25 licences"},
-            {"name": "Gold", "commit": 50, "discount": 45, "onboarding": 0.0, "white_label": False,
+            {"name": "Gold", "commit": 50, "discount": 10, "onboarding": 0.0, "white_label": False,
              "note": "Commit to 50 licences - onboarding free"},
-            {"name": "Platinum", "commit": 100, "discount": 50, "onboarding": 0.0, "white_label": True,
+            {"name": "Platinum", "commit": 100, "discount": 15, "onboarding": 0.0, "white_label": True,
              "note": "Commit to 100 licences - white label included"},
         ],
         # Extra discount for agreeing a longer partner term.
         "terms": [
             {"months": 12, "bonus": 0.0},
-            {"months": 24, "bonus": 2.5},
-            {"months": 36, "bonus": 5.0},
-            {"months": 48, "bonus": 6.0},
-            {"months": 60, "bonus": 7.5},
-            {"months": 72, "bonus": 8.5},
+            {"months": 24, "bonus": 0.0},
+            {"months": 36, "bonus": 0.0},
+            {"months": 48, "bonus": 2.5},
+            {"months": 60, "bonus": 5.0},
+            {"months": 72, "bonus": 7.5},
             {"months": 84, "bonus": 10.0},
         ],
         "default_term": 36,
-        "floor_margin_pct": 25.0,      # wholesale never goes below our cost + this %
+        "floor_margin_pct": 25.0,      # partner price never below our cost + this % (only when our cost is set)
         "ramp_months": 6,              # months to reach the commitment before shortfall applies
         "white_label_fee": 149.0,      # monthly, unless the tier includes it
         "annual_review_pct": 5.0,
         "payment_days": 14,
     },
+    # Reseller logins for the Partners area - managed in Provider > Admin > Partner accounts.
+    # Passwords are stored as salted hashes, never as plain text.
+    "partners": [],
     "terms_customer": "",   # blank = use the default text in cs_core/terms.py
     "terms_reseller": "",
 }
@@ -168,3 +178,17 @@ def save_github(cfg, token, repo, branch="main", path="config.json"):
         return False, f"GitHub said {r.status_code}: {r.text[:160]}"
     except Exception as e:
         return False, f"Could not reach GitHub: {e}"
+
+
+# ─────────────────────────── partner passwords ───────────────────────────
+def hash_password(password):
+    salt = secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 200_000).hex()
+    return salt, h
+
+
+def verify_password(password, salt, stored_hash):
+    if not (password and salt and stored_hash):
+        return False
+    h = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt), 200_000).hex()
+    return hmac.compare_digest(h, stored_hash)

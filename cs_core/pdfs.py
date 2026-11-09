@@ -63,6 +63,10 @@ class Doc(FPDF):
         self.set_xy(120, 11)
         self.set_font("Helvetica", "B", 8); self.set_text_color(*self.VIO)
         self.cell(75, 5, s(self.label), align="R")
+        if getattr(self, "supplier", None):
+            self.set_xy(110, 16.5)
+            self.set_font("Helvetica", "", 7.5); self.set_text_color(*MUTE)
+            self.cell(85, 4, s("Supplied by " + self.supplier.get("company", "")), align="R")
         self.set_fill_color(*self.VIO); self.rect(15, 28, 180, 0.9, "F")
         self.set_y(34)
 
@@ -235,6 +239,29 @@ def _blank(v, n=24):
     return v if v else "_" * n
 
 
+def supplier_panel(pdf, sup):
+    """'Your supplier' box with the reseller's logo and contact details."""
+    y0 = pdf.get_y() + 1
+    pdf.set_fill_color(255, 255, 255); pdf.set_draw_color(*tint(pdf.VIO, 0.35))
+    pdf.rect(15, y0, 180, 20, "DF")
+    x = 19
+    lb = sup.get("logo_b64")
+    if lb:
+        try:
+            import base64 as _b64
+            pdf.image(io.BytesIO(_b64.b64decode(lb)), x=19, y=y0 + 3, h=14, keep_aspect_ratio=True)
+            x = 62
+        except Exception:
+            pass
+    pdf.set_xy(x, y0 + 3); pdf.set_font("Helvetica", "B", 6.8); pdf.set_text_color(*pdf.VIO)
+    pdf.cell(80, 4, "YOUR SUPPLIER")
+    pdf.set_xy(x, y0 + 7.5); pdf.set_font("Helvetica", "B", 10); pdf.set_text_color(*pdf.NAVY)
+    pdf.cell(130, 5, s(sup.get("company", "")))
+    pdf.set_xy(x, y0 + 12.8); pdf.set_font("Helvetica", "", 7.8); pdf.set_text_color(*MUTE)
+    pdf.cell(130, 4, s("  |  ".join(v for v in (sup.get("phone"), sup.get("email"), sup.get("address")) if v))[:120])
+    pdf.set_y(y0 + 23)
+
+
 def cover_page(pdf, cfg, who, title_line, tiles, docs, services=None, prepared_by="", sign=None, highlight=None):
     """Page 1: 'Agreement to go ahead'. One signature here accepts every page of the pack - the box to drop the
     Zoho Sign signature field onto (or the on-screen signature when signed in person)."""
@@ -246,6 +273,8 @@ def cover_page(pdf, cfg, who, title_line, tiles, docs, services=None, prepared_b
     pdf.para(f"Thank you for choosing {B['trading']}. This page summarises your agreement. Signing once, at the bottom of this page, "
              "confirms you accept every page in this pack - there is nothing else to sign.")
     pdf.ln(3)
+    if getattr(pdf, "supplier", None):
+        supplier_panel(pdf, pdf.supplier)
     pdf.tiles(tiles)
     if highlight:
         pdf.callout(*highlight)
@@ -304,10 +333,18 @@ def signed_note(pdf, text):
 
 
 # ─────────────────────────── CUSTOMER PACK ───────────────────────────
-def customer_pack(cfg, q, cust, prepared_by="", show_review=False, terms_text=None, sign=None):
+def customer_pack(cfg, q, cust, prepared_by="", show_review=False, terms_text=None, sign=None, supplier=None):
+    """supplier: a reseller's details - the pack stays Call Scope branded, says 'Supplied by <reseller>',
+    and the reseller is the contracting party in the agreement and the terms."""
+    if supplier:
+        import copy as _copy
+        cfg = _copy.deepcopy(cfg)
+        cfg["brand"].update({"legal": supplier.get("company") or "your supplier", "email": supplier.get("email", ""),
+                             "address": supplier.get("address", ""), "byline": ""})
     B = cfg["brand"]
     q = dict(q, show_review=show_review)
     pdf = Doc(B, "SERVICE ORDER")
+    pdf.supplier = supplier
     stepped = q["discount"] > 0 and q["style"] == "stepped" and q["years"] > 1
     setup_txt = {"invoice": money(q["setup_total"]), "spread": "Over 12 months", "included": "In equipment deal",
                  "waived": "Waived"}[q["setup_mode"]] if q["setup"] else "None"
@@ -444,7 +481,7 @@ def partner_pack(cfg, sim, partner, prepared_by="", white_label=False, terms_tex
     cover_page(pdf, cfg, dict(partner, _kind="partner"),
                f"{B['trading']} partner agreement for {partner.get('company') or 'your business'}  |  "
                f"Prepared {date.today().strftime('%d %B %Y')}" + (f" by {prepared_by}" if prepared_by else ""),
-               [("Partner tier", tier["name"]), ("Discount off RRP", f"{sim['discount']:g}%"),
+               [("Partner tier", tier["name"]), ("Tier discount", f"{sim['discount']:g}%" if sim["discount"] else "List price"),
                 ("Commitment", f"{int(tier['commit'])} licences" if tier["commit"] else "None - pay as you go"),
                 ("Onboarding fee", onboard_txt)],
                [["Partner Order", "2", "Your tier and wholesale price list"],
@@ -462,7 +499,7 @@ def partner_pack(cfg, sim, partner, prepared_by="", white_label=False, terms_tex
 
     pdf.section("Your partner tier")
     wl_txt = "Included" if tier.get("white_label") else ("Yes - " + money(R["white_label_fee"]) + "/mo" if white_label else "Co-branded")
-    pdf.tiles([("Tier", tier["name"]), ("Discount off RRP", f"{sim['discount']:g}%"),
+    pdf.tiles([("Tier", tier["name"]), ("Tier discount", f"{sim['discount']:g}%" if sim["discount"] else "List price"),
                ("Commitment", f"{int(tier['commit'])} licences" if tier["commit"] else "None - pay as you go"),
                ("Partner term", f"{sim['term']} months"),
                ("Ramp period", f"{int(R['ramp_months'])} months" if tier["commit"] else "n/a"),
@@ -499,17 +536,17 @@ def partner_pack(cfg, sim, partner, prepared_by="", white_label=False, terms_tex
         pdf.para(f"The {tier['name']} tier has no commitment - it is pay as you go: you pay only for the customer subscriptions you sell. Grow past a tier's commitment "
                  "for three months in a row and you move up automatically - with a bigger discount.")
     pdf.ln(2)
-    cols = [("Tier", 30, "L"), ("Commitment", 30, "C"), ("Discount off RRP", 32, "C"), ("Onboarding", 28, "R"), ("White label", 28, "C"), ("", 32, "L")]
+    cols = [("Tier", 30, "L"), ("Commitment", 30, "C"), ("Off partner price", 32, "C"), ("Onboarding", 28, "R"), ("White label", 28, "C"), ("", 32, "L")]
     rows = []
     for t in R["tiers"]:
-        rows.append([t["name"], f"{int(t['commit'])}" if t["commit"] else "None", f"{t['discount']:g}%",
+        rows.append([t["name"], f"{int(t['commit'])}" if t["commit"] else "None", f"{t['discount']:g}%" if t["discount"] else "List price",
                      money(t["onboarding"]) if t["onboarding"] else "Waived", "Included" if t.get("white_label") else "Optional",
                      "<- your tier" if t["name"] == tier["name"] else ""])
     pdf.table(cols, rows, bold_cols=(0,))
     bonus = [f"{t['months']} months: +{t['bonus']:g}%" for t in R["terms"] if t["bonus"]]
     pdf.set_font("Helvetica", "I", 7.5); pdf.set_text_color(*MUTE)
     pdf.multi_cell(180, 4, s("Longer partner terms add to your discount - " + ", ".join(bonus) + ". "
-                             f"Wholesale prices never fall below our cost plus {R['floor_margin_pct']:g}%, so a few modules carry a smaller discount than your tier."),
+                             "Tier and term discounts come off the partner price list."),
                    new_x="LMARGIN", new_y="NEXT")
     pdf.section("Key points")
     pdf.bullets([

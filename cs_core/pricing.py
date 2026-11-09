@@ -131,16 +131,18 @@ def term_bonus(cfg, months):
 
 
 def wholesale_list(cfg, tier_name, term):
-    """Per-module wholesale prices for a tier + partner term. Never below our cost + the floor margin."""
+    """Per-module partner prices for a tier + partner term: the partner price list less the tier and term discount.
+    Never below our own cost + the floor margin (when our cost is set)."""
     R = cfg["reseller"]
     tier = tier_by_name(cfg, tier_name)
     disc = float(tier["discount"]) + term_bonus(cfg, term)
     out = []
     for m in cfg["modules"]:
-        raw = r2(m["rrp"] * (1 - disc / 100))
-        floor = r2(m["buy"] * (1 + R["floor_margin_pct"] / 100))
+        base = m.get("wholesale") or m["rrp"]
+        raw = r2(base * (1 - disc / 100))
+        floor = r2(m["buy"] * (1 + R["floor_margin_pct"] / 100)) if m.get("buy") else 0.0
         w = max(raw, floor)
-        out.append({"id": m["id"], "name": m["name"], "unit": m.get("unit", ""), "rrp": r2(m["rrp"]),
+        out.append({"id": m["id"], "name": m["name"], "unit": m.get("unit", ""), "rrp": r2(m["rrp"]), "list": r2(base),
                     "wholesale": w, "floored": raw < floor, "buy": r2(m["buy"]),
                     "partner_margin": r2(m["rrp"] - w), "partner_margin_pct": (m["rrp"] - w) / m["rrp"] * 100 if m["rrp"] else 0,
                     "effective_discount": (1 - w / m["rrp"]) * 100 if m["rrp"] else 0,
@@ -225,7 +227,8 @@ def simulate_partner(cfg, tier_name, term, mix, minutes_per_cust=0, start_custom
         "payback_month": payback, "commit": commit, "commit_hit_month": hit, "ramp": R["ramp_months"],
         "per_customer": {"resale": cust_resale, "wholesale": cust_whsl, "profit": cust_resale - cust_whsl,
                          "licences": lic_per_cust, "setup_resale": setup_resale, "setup_wholesale": setup_w},
-        "end_mrr_profit": (last.get("revenue", 0) - last.get("wholesale", 0) - last.get("shortfall", 0)) if rows else 0.0,
+        # recurring monthly profit at the end of the term (subscriptions only - excludes that month's set-up fees)
+        "end_mrr_profit": (last.get("customers", 0) * (cust_resale - cust_whsl) - last.get("shortfall", 0) - wl_fee) if rows else 0.0,
         "end_customers": last.get("customers", 0), "end_licences": last.get("licences", 0),
         "shortfall_rate": sf_rate, "white_label_fee": wl_fee, "onboarding": onboarding, "onboarding_list": float(tier["onboarding"]),
         "onboarding_mode": onboarding_mode, "onboarding_month": onboard_month, "unit": unit, "include_setup": include_setup,
